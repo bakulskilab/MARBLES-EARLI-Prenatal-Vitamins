@@ -1,0 +1,819 @@
+---
+title: "MARB_EARL_Compare"
+author: "John Dou"
+date: "July 9, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+local.path <- "K:/My Drive/EARLI MARBLES Cross Compare/EARLI_MARBLES_PV_DNAm"
+```
+
+# load results
+```{r, eval=FALSE}
+res.path <- "/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/"
+
+marb.cord <- readRDS(file.path(res.path,'MARBLES_cord/PV/model_results_pv_mo1.rds'))
+marb.plac <- readRDS(file.path(res.path,'MARBLES_placenta/PV/model_results_pv_mo1.rds'))
+earl.cord <- readRDS(file.path(res.path,'EARLI_cord/PV/model_results_pv_mo1.rds'))
+earl.plac <- readRDS(file.path(res.path,'EARLI_placenta/PV/model_results_pv_mo1.rds'))
+
+res <- list(marb.cord=marb.cord,
+            marb.plac=marb.plac,
+            earl.cord=earl.cord,
+            earl.plac=earl.plac)
+
+saveRDS(res, file=file.path(res.path,'res_list_pv2_withX.rds'))
+
+
+marb.cord <- readRDS(file.path(res.path,'MARBLES_cord/PV/global_pv_mo1.rds'))
+marb.plac <- readRDS(file.path(res.path,'MARBLES_placenta/PV/global_pv_mo1.rds'))
+earl.cord <- readRDS(file.path(res.path,'EARLI_cord/PV/global_pv_mo1.rds'))
+earl.plac <- readRDS(file.path(res.path,'EARLI_placenta/PV/global_pv_mo1.rds'))
+
+res.glob <- list(marb.cord=marb.cord,
+            marb.plac=marb.plac,
+            earl.cord=earl.cord,
+            earl.plac=earl.plac)
+
+saveRDS(res.glob, file=file.path(res.path,'global_list_pv2.rds'))
+
+
+
+
+path.marb.cord <- read.csv(file.path(res.path,'MARBLES_cord/PV/pathway_pv_mo1.csv'))
+path.marb.plac <- read.csv(file.path(res.path,'MARBLES_placenta/PV/pathway_pv_mo1.csv'))
+path.earl.cord <- read.csv(file.path(res.path,'EARLI_cord/PV/pathway_pv_mo1.csv'))
+path.earl.plac <- read.csv(file.path(res.path,'EARLI_placenta/PV/pathway_pv_mo1.csv'))
+
+
+paths <- list(marb.cord=path.marb.cord,
+            marb.plac=path.marb.plac,
+            earl.cord=path.earl.cord,
+            earl.plac=path.earl.plac)
+
+saveRDS(paths, file=file.path(res.path,'pathway_list_pv2_withX.rds'))
+```
+
+
+# read locally
+```{r}
+res <- readRDS(file.path(local.path,'Results/res_list_pv2_withX.rds'))
+
+### reduce to common CpGs
+common.cpg <- Reduce(intersect, lapply(res, rownames))
+length(common.cpg) # 422383
+
+res.com <- lapply(res, FUN=function(x){x[common.cpg,]})
+
+global <- readRDS(file.path(local.path,'Results/global_list_pv2.rds'))
+
+path <- readRDS(file.path(local.path,'Results/pathway_list_pv2_withX.rds'))
+```
+
+
+# Write supplementary tables for CpG results
+```{r}
+library(openxlsx)
+
+write.csv(res$marb.cord, file.path(local.path,'Tables/Supplementary Table 4 - MARBLES Cord Blood Single Site Results.csv'))
+write.csv(res$marb.plac, file.path(local.path,'Tables/Supplementary Table 2 - MARBLES Placenta Single Site Results.csv'))
+
+write.csv(res$earl.cord, file.path(local.path,'Tables/Supplementary Table 3 - EARLI Cord Blood Single Site Results.csv'))
+write.csv(res$earl.plac, file.path(local.path,'Tables/Supplementary Table 1 - EARLI Placenta Single Site Results.csv'))
+```
+
+
+# Compare past study
+```{r}
+rep <- read.csv(file.path(local.path,'Results/results.model2.sorted.dbGAP.csv'))
+
+top01 <- lapply(res.com, FUN=function(x){
+  rownames(x[x$P.Value<0.01,])
+})
+names(top01) <- c('MARBLES Cord', 'MARBLES Placenta', 'EARLI Cord', 'EARLI Placenta')
+
+rep01 <- rep[rep$pvalue<0.01, 'CpG']
+
+length(rep01)
+
+lapply(top01, FUN=function(x){
+  len = length(x)
+  size = length(intersect(rep01, x))
+  return(c(len,size))
+})
+
+
+rep$p01 <- rep$pvalue<0.01
+
+common <- intersect(rownames(res.com$marb.cord), rep$CpG)
+rep <- rep[match(common, rep$CpG), ]
+
+
+res01 <- lapply(res.com, FUN=function(x){
+  x$p01 = x$P.Value<0.01
+  x
+})
+
+mc01 <- res01$marb.cord
+mc01 <- mc01[common,]
+table(mc01$p01, rep$p01) %>% fisher.test()
+
+mp01 <- res01$marb.plac
+mp01 <- mp01[common,]
+table(mp01$p01, rep$p01) %>% fisher.test()
+
+
+ec01 <- res01$earl.cord
+ec01 <- ec01[common,]
+table(ec01$p01, rep$p01) %>% fisher.test()
+
+ep01 <- res01$earl.plac
+ep01 <- ep01[common,]
+table(ep01$p01, rep$p01) %>% fisher.test()
+
+```
+# accounting
+```{r}
+direction01 <- lapply(res, FUN=function(x){
+  P01 = x$P.Value<0.01
+  Dir = x$logFC>0
+  tab = table(P01, Dir)
+  
+  x01 = x[x$P.Value<0.01,]
+  prop01 = prop.table(table(x01$logFC>0))
+  
+  hypo.mean = mean(x01[x01$logFC<0,'logFC'])
+  
+  list(tab, prop01, hypo.mean)
+})
+
+
+direction01
+
+
+lt01 <- lapply(res, FUN=function(x){
+  P01 = table(x$P.Value<0.01)
+})
+
+lt01
+
+```
+
+# overlap p<0.001
+```{r }
+library(UpSetR)
+
+# top001 <- lapply(res.com, FUN=function(x){
+#   rownames(x[x$P.Value<0.001,])
+# })
+# 
+# upset(fromList(top001), 
+#       nsets=7, 
+#       mainbar.y.label = "Number\nof CpGs\n\n", 
+#       order.by='freq',
+#       keep.order=T,
+#       text.scale=c(2.3, 1.8, 1.8, 1.7, 1.6, 1.6))
+
+
+top01 <- lapply(res.com, FUN=function(x){
+  rownames(x[x$P.Value<0.01,])
+})
+names(top01) <- c('MARBLES Cord', 'MARBLES Placenta', 'EARLI Cord', 'EARLI Placenta')
+
+upset01 <- upset(fromList(top01), 
+      mainbar.y.label = "Number\nof CpGs\n\n", 
+      order.by='freq',
+      keep.order=T,
+      text.scale=c(2.3, 1.8, 1.8, 1.3, 1.6, 1.6))
+
+pdf(file.path(local.path,"Figures/upset_p01.pdf"))
+  upset01
+dev.off()
+
+```
+
+# Volcano
+```{r}
+library(grid)
+library(gridExtra)
+library(ggplot2)
+
+plot.volcano <- function(ss.hits,main=NULL){
+  par(mar=c(5,5,3,3))
+  
+  #get betas and pvals from single sites results
+  betas <- ss.hits$logFC
+  pvals <- -log(ss.hits$P.Value,10)
+  
+  #assign colors
+  pcol <- ifelse(pvals < -log(0.01,10), 'darkslategrey', ifelse(betas>0,'cadetblue4','cadetblue3'))
+  
+  #get percent hyper/hypo for sites above threshold
+  total <- table(pcol)['cadetblue4'] + table(pcol)['cadetblue3']
+  pct <- c(round(table(pcol)['cadetblue4']/total * 100,1),round(table(pcol)['cadetblue3']/total * 100,1))
+  
+  #plotting stuff
+  # plot(betas,pvals, las=1, main=main, xlab=paste0('Effect Estimate'), ylab=expression('-Log'[10]*'(P-Value)'),
+  #      xlim=c(-0.46,0.46),ylim=c(0,7),cex.axis=1.4,cex.lab=1.4,cex.main=1.4,cex=0.7,pch=21,col=pcol)
+  # abline(h=-log(0.01,10),col='blue')
+  # abline(h=7,col='red')
+  # text(0.3,6,paste0(pct[1],'%'),col='cadetblue4',cex=2.2)
+  # text(-0.3,6,paste0(pct[2],'%'),col='cadetblue3',cex=2.2)
+  # 
+  dat <- data.frame(betas=betas, pvals=pvals, pcol=pcol)
+  
+  ggplot(dat, aes(x=betas, y=pvals, col=pcol)) +
+    geom_point() +
+    theme_bw() + xlim(c(-0.46,0.46)) + ylim(c(0,7)) +
+    xlab('Effect Estimate') + ylab(expression('-Log'[10]*'(P-Value)')) +
+    geom_hline(yintercept=7, color = "red") + 
+    geom_hline(yintercept=2, color = "blue") +
+    theme(legend.position = "none") + 
+    scale_colour_manual(name = "pcol",values = c('cadetblue3','cadetblue4','darkslategrey')) + 
+    geom_text(inherit.aes = F, aes(x=0.3, y=6, col='cadetblue4'), label=paste0(pct[1],'%'), size=9) +
+    geom_text(inherit.aes = F, aes(x=-0.3, y=6, col='cadetblue3'), label=paste0(pct[2],'%'), size=9) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          axis.text = element_text(size=14), axis.title = element_text(size=14))
+    
+}
+
+
+png(file.path(local.path,"Figures/EARLI_Cord_volcano.png"))
+  plot.volcano(res$earl.cord)
+dev.off()
+
+png(file.path(local.path,"Figures/EARLI_Placenta_volcano.png"))
+  plot.volcano(res$earl.plac)
+dev.off()
+
+png(file.path(local.path,"Figures/MARBLES_Cord_volcano.png"))
+  plot.volcano(res$marb.cord)
+dev.off()
+
+png(file.path(local.path,"Figures/MARBLES_Placenta_volcano.png"))
+  plot.volcano(res$marb.plac)
+dev.off()
+
+vol.ec <- plot.volcano(res$earl.cord)
+vol.ep <- plot.volcano(res$earl.plac)
+vol.mc <- plot.volcano(res$marb.cord)
+vol.mp <- plot.volcano(res$marb.plac)
+
+vol.plot <- grid.arrange(arrangeGrob(vol.ec, top="EARLI", left="Cord"), 
+             arrangeGrob(vol.mc, top="MARBLES"), 
+             arrangeGrob(vol.ep, left="Placenta"), 
+             vol.mp,
+             ncol=2, nrow=2)
+
+ggsave(vol.plot, file=file.path(local.path,'Figures/Volcano_plot.png'), height=7, width=7)
+
+```
+
+# Correlation of beta coefficients
+```{r corr}
+library(corrplot)
+
+### cogs cpgs
+names(res.com) <- c('MARBLES\nCord', 'MARBLES\nPlacenta', 'EARLI\nCord', 'EARLI\nPlacenta')
+betas <- do.call(cbind, lapply(res.com, FUN=function(x){x$logFC}))
+M <- cor(betas, method='pearson')
+
+cor.test(betas[,1], betas[,3])
+cor.test(betas[,2], betas[,4])
+
+pdf(file.path(local.path,'Figures/corr_common.pdf'))
+  corrplot(M, method='ellipse', type='upper', addCoef.col='black')
+dev.off()
+
+### top CpGs cross compare
+top01 <- lapply(res.com, FUN=function(x){
+  rownames(x[x$P.Value<0.01,])
+})
+
+M.top <- M
+for(col in colnames(M.top)){
+  for(row in rownames(M.top)){
+    set1 <- res.com[[col]]
+    set1 <- set1[top01[[col]],]
+    
+    set2 <- res.com[[row]]
+    set2 <- set2[top01[[row]],]
+    
+    cross <- intersect(rownames(set1),rownames(set2))
+    
+    set1 <- set1[cross,'logFC']
+    set2 <- set2[cross,'logFC']
+    
+    M.top[row, col] <- cor(set1, set2)
+  }
+}
+diag(M.top) <- NA
+
+N.top <- M
+for(col in colnames(M.top)){
+  for(row in rownames(M.top)){
+    set1 <- res.com[[col]]
+    set1 <- set1[top01[[col]],]
+    
+    set2 <- res.com[[row]]
+    set2 <- set2[top01[[row]],]
+    
+    cross <- intersect(rownames(set1),rownames(set2))
+    
+    N.top[row, col] <- length(cross)
+  }
+}
+#N.top <- matrix(paste0('n=',N.top), nrow=4, ncol=4)
+
+pdf(file.path(local.path,'Figures/corrplot_top01_withX.pdf'))
+  corrplot(M.top, method='ellipse', addCoef.col='black', tl.pos='d')
+  corrplot(N.top, type='lower', method='number', diag=F, col='black', is.corr=FALSE, add=T, cl.pos='n', tl.pos='n', number.digits = 0)
+dev.off()
+
+```
+
+```{r scatter}
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(ggpubr)
+
+names(top01) <- c('MARBLES Cord', 'MARBLES Placenta', 'EARLI Cord', 'EARLI Placenta')
+names(res.com) <- c('MARBLES Cord', 'MARBLES Placenta', 'EARLI Cord', 'EARLI Placenta')
+
+plot.comp <- function(res1, res2){
+  set1 <- res.com[[res1]]
+  set1 <- set1[top01[[res1]],]
+      
+  set2 <- res.com[[res2]]
+  set2 <- set2[top01[[res2]],]
+  
+  cross <- intersect(rownames(set1),rownames(set2))
+    
+  set1 <- set1[cross,'logFC']
+  set2 <- set2[cross,'logFC']
+  
+  dat <- data.frame(x=set1, y=set2)
+  
+  print(dim(dat))
+  
+  ggplot(dat, aes(x=x, y=y)) +
+    geom_point() +
+    geom_hline(yintercept=0) + geom_vline(xintercept=0) +
+    xlab(res1) + ylab(res2) +
+    theme_bw() +
+    geom_smooth(method='lm', se=F) +
+    theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=18,face="bold"))
+}
+
+
+scatter_cord <- plot.comp('MARBLES Cord','EARLI Cord')
+
+scatter_placenta <- plot.comp('MARBLES Placenta','EARLI Placenta')
+
+scatter_marb <- plot.comp('MARBLES Cord','MARBLES Placenta')
+
+scatter_earl <- plot.comp('EARLI Cord','EARLI Placenta')
+
+
+scatter_cross_tissue <- ggarrange(scatter_marb, scatter_earl, nrow=1, labels=c("A.","B."))
+scatter_cross_cohort <- ggarrange(scatter_cord, scatter_placenta, nrow=1, labels=c("A.","B."))
+
+ggsave(scatter_cross_tissue, filename=file.path(local.path,"Figures/Scatter_Plot_Cross_Tissue.svg"), height=4, width=9)
+ggsave(scatter_cross_cohort, filename=file.path(local.path,"Figures/Scatter_Plot_Cross_Cohort.svg"), height=3, width=8)
+
+```
+
+# global
+```{r global}
+library(ggplot2)
+
+dat <- data.frame(do.call(rbind, global))
+dat$region <- rownames(dat)
+dat$region <- gsub('\\.[0-9]$','',dat$region)
+dat$region <- ifelse(dat$region=='meanDNAm', 'Overall', 
+              ifelse(dat$region=='meanDNAm.sea', 'Sea',
+              ifelse(dat$region=='meanDNAm.shore', 'Shore',
+              ifelse(dat$region=='meanDNAm.shelf', 'Shelf','Island'))))
+dat$region <- factor(dat$region, levels=dat$region[5:1])
+dat$cohort <- c(rep('MARBLES Cord',5), rep('MARBLES Placenta',5), rep('EARLI Cord',5), rep('EARLI Placenta',5))
+dat$upper <- dat$est + 1.96*dat$std_err
+dat$lower <- dat$est - 1.96*dat$std_err
+dat$cohort <- factor(dat$cohort, levels=c('MARBLES Cord','EARLI Cord','MARBLES Placenta','EARLI Placenta'))
+
+p <- ggplot(dat, aes(x=region, y=est, ymin=lower, ymax=upper)) +
+  geom_pointrange(aes(col=region)) +
+  geom_hline(aes(fill=region), yintercept=0, linetype=2)+
+  geom_errorbar(aes(ymin=lower, ymax=upper,col=region),width=0.5,cex=1)+ 
+  facet_wrap(~cohort,strip.position="left",nrow=2,scales = "free_y") +
+  theme_bw() +
+  theme(plot.title=element_text(size=16,face="bold"),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.text.x=element_text(face="bold"),
+        axis.title=element_text(size=12,face="bold"),
+        strip.text.y = element_text(hjust=0,vjust = 1,angle=180,face="bold"))+
+   coord_flip() + xlab('') + ylab('Difference in Mean Methylation') +
+  guides(color = guide_legend(reverse=TRUE, title="CpG Island Region"))
+
+pdf(file.path(local.path,'forest_global.pdf'))
+p
+dev.off()
+```
+
+Pathway
+```{r}
+top.path <- lapply(path, FUN=function(x){
+  x = x[x$P.DE<0.01,]
+  x$TERM
+})
+
+upset(fromList(top.path), 
+      nsets=7, 
+      mainbar.y.label = "Number\nof Pathways\n\n", 
+      order.by='freq',
+      keep.order=T,
+      text.scale=c(2.3, 1.8, 1.8, 1.3, 1.6, 1.6))
+
+common.paths <- Reduce(intersect, lapply(path, FUN=function(pathway){pathway$TERM}))
+
+
+ordered <- lapply(path, FUN=function(x){
+  x[match(common.paths, x$TERM), ]
+})
+
+path.rank.sum <- data.frame(path=common.paths,
+                            marb.cord=as.numeric(rownames(ordered$marb.cord)),
+                            marb.plac=as.numeric(rownames(ordered$marb.plac)),
+                            earl.cord=as.numeric(rownames(ordered$earl.cord)),
+                            earl.plac=as.numeric(rownames(ordered$earl.plac)))
+path.rank.sum$sum <- path.rank.sum$marb.cord + path.rank.sum$marb.plac + path.rank.sum$earl.cord + path.rank.sum$earl.plac
+path.rank.sum <- path.rank.sum[order(path.rank.sum$sum),]
+
+write.csv(path.rank.sum, file=file.path(local.path,'pathways_rank_sum_PV_withX.csv'), row.names=F)
+
+path.rank.sum$cord_rank <- path.rank.sum$marb.cord + path.rank.sum$earl.cord
+path.rank.sum$placenta_rank <- path.rank.sum$marb.plac + path.rank.sum$earl.plac
+
+path.rank.sum <- path.rank.sum[order(path.rank.sum$cord_rank),]
+write.csv(path.rank.sum, file=file.path(local.path,'pathways_rank_sum_PV_cord_withX.csv'), row.names=F)
+
+path.rank.sum <- path.rank.sum[order(path.rank.sum$placenta_rank),]
+write.csv(path.rank.sum, file=file.path(local.path,'pathways_rank_sum_PV_plac_withX.csv'), row.names=F)
+
+```
+
+
+MARBLES DMR Placenta
+```{r dmr placenta}
+library(openxlsx)
+library(GenomicRanges)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+library(dplyr)
+
+data(Locations)
+
+dmr <- read.xlsx("F:/Drive/EARLI MARBLES Cross Compare/DMR_Plac/DMRs_annotated.xlsx")
+nrow(dmr) #165
+table(dmr$betaCoefficient<0)
+FALSE  TRUE 
+   33   132
+
+# dmr.out <- readRDS("F:/Drive/EARLI MARBLES Cross Compare/DMR_Plac/dmrcatePV.rds")
+
+cpg <- readRDS(file.path(local.path,'res_list_pv2.rds'))
+cpgs <- cpg$marb.plac
+
+locs <- Locations[rownames(cpgs),]
+cpgs.l <- cbind(cpgs,locs)
+cpgs.top <- cpgs.l[cpgs.l$P.Value<0.01,]
+
+gr.dmr <- GRanges(seqnames=dmr$seqnames,ranges=IRanges(start=dmr$start, end=dmr$end))
+gr.cpg <- GRanges(seqnames=cpgs.l$chr,ranges=IRanges(start=cpgs.l$pos, end=cpgs.l$pos))
+
+overlap.top <- findOverlaps(gr.dmr, gr.cpg, maxgap = 5000)
+overlap.top
+length(unique(overlap.top@from))
+#130
+#35 when no gap allowed
+
+# overlap.dmr <- findOverlaps(gr.dmr, dmr.out, maxgap = 5000)
+# length(unique(overlap.dmr@from)) # 2
+
+print(gr.dmr[1,])
+print(gr.cpg[1766,])
+
+
+View(dmr[overlap.top@from,])
+View(data.frame(cpgs.l[overlap.top@to,]))
+
+comp <- data.frame(chr=dmr[overlap.top@from,]$seqnames,
+                   dmr.start=dmr[overlap.top@from,]$start,
+                   dmr.end=dmr[overlap.top@from,]$end,
+                   WGBS_beta=dmr[overlap.top@from,]$betaCoefficient,
+                   EPIC_beta=cpgs.l[overlap.top@to,]$logFC,
+                   cpg.pos=cpgs.l[overlap.top@to,]$pos)
+comp$same_direction <- sign(comp$WGBS_beta * comp$EPIC_beta)
+comp$dmrID <- paste0(comp$chr,':', comp$dmr.start, comp$dmr.end)
+View(comp)
+
+direction_counting <- comp %>% group_by(dmrID) %>% summarize(N=n(), same=sum(same_direction==1), pct_same=same/N)
+View(direction_counting)
+
+summary(direction_counting$N)
+summary(direction_counting$pct_same)
+
+ggplot(direction_counting, aes(x=N)) + geom_histogram() + theme_bw() + xlab('N EPIC CpGs Overlapping with WGBS DMR')
+ggplot(direction_counting, aes(x=pct_same)) + geom_histogram() + theme_bw() + xlab('% EPIC CpGs Overlapping with WGBS DMR with Same Direction of Effect')
+
+comp <- comp[!duplicated(comp$cpg.pos),]
+table(comp$same_direction)
+```
+
+
+MARBLES DMR Cord
+```{r dmr cord}
+library(openxlsx)
+library(GenomicRanges)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+library(dplyr)
+library(ggplot2)
+
+data(Locations)
+
+dmr.h4000 <- read.xlsx("F:/Drive/EARLI MARBLES Cross Compare/DMR_Cord/DMRs_annotated_marb_hiseq4000.xlsx")
+nrow(dmr.h4000) #301
+table(dmr.h4000$betaCoefficient<0)
+FALSE  TRUE 
+  151   150
+
+dmr.h10 <- read.xlsx("F:/Drive/EARLI MARBLES Cross Compare/DMR_Cord/DMRs_annotated_marb_hiseqX10.xlsx")
+nrow(dmr.h10) #469
+table(dmr.h10$betaCoefficient<0)
+FALSE  TRUE 
+  150   319
+  
+cpg <- readRDS(file.path(local.path,'res_list_pv2.rds'))
+cpgs <- cpg$marb.cord
+
+locs <- Locations[rownames(cpgs),]
+cpgs.l <- cbind(cpgs,locs)
+cpgs.top <- cpgs.l[cpgs.l$P.Value<0.01,]
+
+gr.dmr.h10 <- GRanges(seqnames=dmr.h10$seqnames,ranges=IRanges(start=dmr.h10$start, end=dmr.h10$end))
+gr.dmr.h4000 <- GRanges(seqnames=dmr.h4000$seqnames,ranges=IRanges(start=dmr.h4000$start, end=dmr.h4000$end))
+
+gr.cpg <- GRanges(seqnames=cpgs.top$chr,ranges=IRanges(start=cpgs.top$pos, end=cpgs.top$pos))
+gr.cpg <- GRanges(seqnames=cpgs.l$chr,ranges=IRanges(start=cpgs.l$pos, end=cpgs.l$pos))
+
+overlap.platform <- findOverlaps(gr.dmr.h10, gr.dmr.h4000)
+overlap.platform
+
+overlap.h10 <- findOverlaps(gr.dmr.h10, gr.cpg)
+overlap.h10
+length(unique(overlap.h10@from))
+#0
+#17 5kb gap
+
+overlap.h4000 <- findOverlaps(gr.dmr.h4000, gr.cpg)
+overlap.h4000
+length(unique(overlap.h4000@from))
+#0 no gap
+#6 5kb gap
+
+
+
+comp.h10 <- data.frame(chr=dmr.h10[overlap.h10@from,]$seqnames,
+                   dmr.start=dmr.h10[overlap.h10@from,]$start,
+                   dmr.end=dmr.h10[overlap.h10@from,]$end,
+                   WGBS_beta=dmr.h10[overlap.h10@from,]$betaCoefficient,
+                   EPIC_beta=cpgs.l[overlap.h10@to,]$logFC,
+                   cpg.pos=cpgs.l[overlap.h10@to,]$pos)
+comp.h10$same_direction <- sign(comp.h10$WGBS_beta * comp.h10$EPIC_beta)
+comp.h10$dmrID <- paste0(comp.h10$chr,':', comp.h10$dmr.start, comp.h10$dmr.end)
+
+direction_counting.h10 <- comp.h10 %>% group_by(dmrID) %>% summarize(N=n(), same=sum(same_direction==1), pct_same=same/N)
+View(direction_counting.h10)
+
+summary(direction_counting.h10$N)
+summary(direction_counting.h10$pct_same)
+
+ggplot(direction_counting.h10, aes(x=N)) + geom_histogram() + theme_bw() + xlab('N EPIC CpGs Overlapping with WGBS DMR')
+ggplot(direction_counting.h10, aes(x=pct_same)) + geom_histogram() + theme_bw() + xlab('% EPIC CpGs Overlapping with WGBS DMR with Same Direction of Effect')
+
+comp.h10 <- comp.h10[!duplicated(comp.h10$cpg.pos),]
+table(comp.h10$same_direction)
+
+
+
+comp.h4000 <- data.frame(chr=dmr.h4000[overlap.h4000@from,]$seqnames,
+                   dmr.start=dmr.h4000[overlap.h4000@from,]$start,
+                   dmr.end=dmr.h4000[overlap.h4000@from,]$end,
+                   WGBS_beta=dmr.h4000[overlap.h4000@from,]$betaCoefficient,
+                   EPIC_beta=cpgs.l[overlap.h4000@to,]$logFC,
+                   cpg.pos=cpgs.l[overlap.h4000@to,]$pos)
+comp.h4000$same_direction <- sign(comp.h4000$WGBS_beta * comp.h4000$EPIC_beta)
+comp.h4000$dmrID <- paste0(comp.h4000$chr,':', comp.h4000$dmr.start, comp.h4000$dmr.end)
+
+direction_counting.h4000 <- comp.h4000 %>% group_by(dmrID) %>% summarize(N=n(), same=sum(same_direction==1), pct_same=same/N)
+
+summary(direction_counting.h4000$N)
+summary(direction_counting.h4000$pct_same)
+
+ggplot(direction_counting.h4000, aes(x=N)) + geom_histogram() + theme_bw() + xlab('N EPIC CpGs Overlapping with WGBS DMR')
+ggplot(direction_counting.h4000, aes(x=pct_same)) + geom_histogram() + theme_bw() + xlab('% EPIC CpGs Overlapping with WGBS DMR with Same Direction of Effect')
+
+comp.h4000 <- comp.h4000[!duplicated(comp.h4000$cpg.pos),]
+table(comp.h4000$same_direction)
+
+```
+
+EARLI DMR Cord
+```{r dmr placenta}
+library(openxlsx)
+library(GenomicRanges)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(dplyr)
+library(ggplot2)
+
+data(Locations)
+
+dmr <- read.xlsx("F:/Drive/EARLI MARBLES Cross Compare/DMR_Cord/DMRs_annotated_earli.xlsx")
+nrow(dmr) #36
+table(dmr$betaCoefficient<0)
+FALSE  TRUE 
+   13    23 
+  
+cpg <- readRDS(file.path(local.path,'res_list_pv2.rds'))
+cpgs <- cpg$earl.cord
+
+locs <- Locations[rownames(cpgs),]
+cpgs.l <- cbind(cpgs,locs)
+cpgs.top <- cpgs.l[cpgs.l$P.Value<0.01,]
+
+gr.dmr <- GRanges(seqnames=dmr$seqnames,ranges=IRanges(start=dmr$start, end=dmr$end))
+gr.cpg <- GRanges(seqnames=cpgs.top$chr,ranges=IRanges(start=cpgs.top$pos, end=cpgs.top$pos))
+gr.cpg <- GRanges(seqnames=cpgs.l$chr,ranges=IRanges(start=cpgs.l$pos, end=cpgs.l$pos))
+
+overlap.top <- findOverlaps(gr.dmr, gr.cpg)
+overlap.top
+length(unique(overlap.top@from))
+#0 when no gap allowed
+
+comp <- data.frame(chr=dmr[overlap.top@from,]$seqnames,
+                   dmr.start=dmr[overlap.top@from,]$start,
+                   dmr.end=dmr[overlap.top@from,]$end,
+                   WGBS_beta=dmr[overlap.top@from,]$betaCoefficient,
+                   EPIC_beta=cpgs.l[overlap.top@to,]$logFC,
+                   cpg.pos=cpgs.l[overlap.top@to,]$pos)
+comp$same_direction <- sign(comp$WGBS_beta * comp$EPIC_beta)
+comp$dmrID <- paste0(comp$chr,':', comp$dmr.start, comp$dmr.end)
+View(comp)
+
+nrow(comp)
+table(comp$same_direction)
+table(comp$same_direction) %>% prop.table
+
+direction_counting <- comp %>% group_by(dmrID) %>% summarize(N=n(), same=sum(same_direction==1), pct_same=same/N)
+View(direction_counting)
+
+summary(direction_counting$N)
+summary(direction_counting$pct_same)
+
+ggplot(direction_counting, aes(x=N)) + geom_histogram() + theme_bw() + xlab('N EPIC CpGs Overlapping with WGBS DMR')
+ggplot(direction_counting, aes(x=pct_same)) + geom_histogram() + theme_bw() + xlab('% EPIC CpGs Overlapping with WGBS DMR with Same Direction of Effect')
+
+```
+
+#sample overlap
+```{r, eval=F}
+library(openxlsx)
+
+wgbs.ec <- read.xlsx("/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/EARLI_cord_sample_info.xlsx")
+wgbs.mcx10 <- read.xlsx("/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/Cord_MARBLES_HiSeqXTen_sample_info.xlsx")
+wgbs.mc4000 <- read.xlsx("/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/Cord_MARBLES_HiSeq4000_sample_info.xlsx")
+
+pd.ec <- readRDS('/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/EARLI_cord/QC/pd.rds')
+pd.mc <- readRDS('/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_cord/QC/pd.rds')
+  
+table(wgbs.ec$COI_ID %in% pd.ec$COI_ID)
+# FALSE  TRUE
+#    12    51
+
+table(wgbs.mcx10$COI_ID %in% pd.mc$COI_ID)
+# FALSE  TRUE
+#     7    35
+
+table(wgbs.mc4000$COI_ID %in% pd.mc$COI_ID)
+# FALSE  TRUE
+#    15    30
+
+```
+
+# EFORGE
+```{r}
+library(ggplot2)
+library(dplyr)
+
+#read in results
+eforge.ec <- read.table(file.path(local.path,'Results/eFORGE/earl_cord.gz'),header=T, sep='\t', comment.char="", quote="")
+eforge.ep <- read.table(file.path(local.path,'Results/eFORGE/earl_placenta.gz'),header=T, sep='\t', comment.char="", quote="")
+eforge.mc <- read.table(file.path(local.path,'Results/eFORGE/marb_cord_1000.gz'),header=T, sep='\t', comment.char="", quote="")
+eforge.mp <- read.table(file.path(local.path,'Results/eFORGE/marb_placenta_1000.gz'),header=T, sep='\t', comment.char="", quote="")
+
+eforge <- list(earl.cord=eforge.ec, 
+               earl.plac=eforge.ep,
+               marb.cord=eforge.mc,
+               marb.plac=eforge.mp)
+
+#sort by pvalue
+eforge <- lapply(eforge, FUN=function(x){
+  x <- x[order(x$Pvalue),]
+  x$nlp <- -log(x$Pvalue, 10)
+  x$sig <- x$Qvalue < 0.01
+  x$sig <- ifelse(x$sig, "Q-value < 0.01", "Q-value >= 0.01")
+  x
+})
+
+
+ggplot(eforge$earl.cord, aes(y=Tissue, x=nlp, col=sig)) +
+  geom_point() + theme_bw() + theme(legend.position = "none") +
+  xlab("-log10 p-value") + ylab("") + ggtitle("EARLI Cord")
+
+ggplot(eforge$earl.plac, aes(y=Tissue, x=nlp, col=sig)) +
+  geom_point() + theme_bw() + theme(legend.position = "none") +
+  xlab("-log10 p-value") + ylab("") + ggtitle("EARLI Placenta")
+
+ggplot(eforge$marb.cord, aes(y=Tissue, x=nlp, col=sig)) +
+  geom_point() + theme_bw() + theme(legend.position = "none") +
+  xlab("-log10 p-value") + ylab("") + ggtitle("MARBLES Cord")
+
+ggplot(eforge$marb.plac, aes(y=Tissue, x=nlp, col=sig)) +
+  geom_point() + theme_bw() + theme(legend.position = "none") +
+  xlab("-log10 p-value") + ylab("") + ggtitle("MARBLES Placenta")
+
+
+
+ggplot(eforge$earl.cord, aes(y=Datatype, x=nlp, col=sig)) +
+  geom_point() + theme_bw() + theme(legend.position = "none") +
+  xlab("-log10 p-value") + ylab("") + ggtitle("EARLI Cord")
+
+ggplot(eforge$earl.plac, aes(y=Datatype, x=nlp, col=sig)) +
+  geom_point() + theme_bw() + theme(legend.position = "none") +
+  xlab("-log10 p-value") + ylab("") + ggtitle("EARLI Placenta")
+
+ggplot(eforge$marb.cord, aes(y=Datatype, x=nlp, col=sig)) +
+  geom_point() + theme_bw() + theme(legend.position = "none") +
+  xlab("-log10 p-value") + ylab("") + ggtitle("MARBLES Cord")
+
+ggplot(eforge$marb.plac, aes(y=Datatype, x=nlp, col=sig)) +
+  geom_point() + theme_bw() + theme(legend.position = "none") +
+  xlab("-log10 p-value") + ylab("") + ggtitle("MARBLES Placenta")
+
+
+#combine all in one
+labels <- c("EARLI Cord", "EARLI Placenta", "MARBLES Cord", "MARBLES Placenta")
+
+for(i in 1:4){
+  eforge[[i]]$lab = labels[i]
+}
+eforge.combi <- bind_rows(eforge)
+eforge.combi$sig <- factor(eforge.combi$sig, levels=(c('Q-value >= 0.01','Q-value < 0.01')))
+eforge.combi$lab <- factor(eforge.combi$lab, levels=(c('MARBLES Placenta', 'MARBLES Cord','EARLI Placenta','EARLI Cord')))
+
+eforge.combi$alpha <- ifelse(eforge.combi$sig=='Q-value < 0.01', 1, 0.1)
+
+eforge.combi <- eforge.combi %>%
+  mutate(Datatype = case_when(
+    Datatype=="ZNF-Rpts" ~ "zinc finger genes\n& repeats",
+    Datatype=="TxWk" ~ "Weak transcription",
+    Datatype=="TxFlnk" ~ "transcription at gene 5' and 3'",
+    Datatype=="Tx" ~ "Strong transcription",
+    Datatype=="TssBiv" ~ "Bivalent/Poised transcription start site",
+    Datatype=="TssAFlnk" ~ "Flanking Active transcription start site",
+    Datatype=="TssA" ~ "Active transcription start site",
+    Datatype=="ReprPCWk" ~ "Weak Repressed PolyComb",
+    Datatype=="ReprPC" ~ "Repressed PolyComb",
+    Datatype=="Quies" ~ "Quiescent/Low",
+    Datatype=="Het" ~ "Heterochromatin",
+    Datatype=="EnhG" ~ "Generic Enhancers",
+    Datatype=="EnhBiv" ~ "Flanking Bivalent TSS/Enhancer",
+    Datatype=="Enh" ~ "Enhancers",
+    Datatype=="BivFlnk" ~ "Flanking Bivalent TSS/Enhancers"))
+
+ggplot(eforge.combi) +
+  geom_point(aes(y=nlp, x=Datatype, color=lab, alpha=alpha), position=position_dodge(0.7)) +
+  theme_bw() + coord_flip() + 
+  guides(color = guide_legend(reverse=T),
+         alpha = "none") +
+  labs(color="", x="", y="-log P-value")
+
+ggplot(eforge.combi) +
+  geom_point(aes(y=nlp, x=Tissue, color=lab), position=position_dodge(0.7)) +
+  theme_bw() + coord_flip() + guides(color = guide_legend(reverse=T)) +
+  labs(color="", alpha="", x="", y="-log P-value")
+
+```

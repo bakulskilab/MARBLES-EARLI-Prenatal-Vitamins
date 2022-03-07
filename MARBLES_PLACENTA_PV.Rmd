@@ -1,0 +1,445 @@
+---
+title: "MARBLES_CORD_ASD"
+author: "John Dou"
+date: "June 25, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, message=F, warning=F}
+library(minfi)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+library(sas7bdat)
+library(openxlsx)
+ 
+res.path <- "/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_placenta/"
+```
+
+```{r}
+library(tidyr)
+library(corrplot)
+
+cells <- pd.cov[,c('COI_ID','Trophoblasts','Stromal','Hofbauer','Endothelial','nRBC','Syncytiotrophoblast')]
+
+M <- cor(cells[,-1], method='spearman', use='pairwise.complete.obs')
+pdf(file.path(res.path,'MARBLES_cell_correlation.pdf'), height=14, width=14)
+  corrplot(M, method='ellipse', type='upper', addCoef.col='black')
+dev.off()
+
+cells.long <- pivot_longer(cells, cols=c('Trophoblasts','Stromal','Hofbauer','Endothelial','nRBC','Syncytiotrophoblast')) 
+cells.long$COI_ID <- factor(cells.long$COI_ID)
+pdf('/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_placenta/cell.pdf')
+  ggplot(cells.long, aes(fill=name, y=value, x=COI_ID)) + 
+    geom_bar(position="fill", stat="identity")
+dev.off()
+
+cells <- pd.cov[,c('Trophoblasts','Stromal','Hofbauer','Endothelial','nRBC','Syncytiotrophoblast')]
+pc <- princomp(cells)
+pca <- pc$scores
+
+pc.cell <- prcomp(t(cells))
+pc.cell <- pc.cell$x
+pc.cell <- data.frame(pc.cell)
+pc.cell$cell <- rownames(pc.cell)
+
+pdf('/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_placenta/cell_pc.pdf')
+  ggplot(pc.cell, aes(y=PC2, x=PC1, label=cell)) + 
+    geom_point() + geom_text()
+dev.off()
+
+
+cor.test(pca[,1],cells$Trophoblasts)
+#         Pearson's product-moment correlation
+# 
+# data:  pca[, 1] and cells$Trophoblasts
+# t = 9.8001, df = 88, p-value = 9.252e-16
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.6059507 0.8085261
+# sample estimates:
+#       cor
+# 0.7223911
+
+cor.test(pca[,1],cells$Stromal)
+#         Pearson's product-moment correlation
+# 
+# data:  pca[, 1] and cells$Stromal
+# t = 7.4527, df = 88, p-value = 5.988e-11
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.4763169 0.7345185
+# sample estimates:
+#       cor
+# 0.6220485
+
+cor.test(pca[,1],cells$Hofbauer)
+#         Pearson's product-moment correlation
+# 
+# data:  pca[, 1] and cells$Hofbauer
+# t = 4.5869, df = 88, p-value = 1.482e-05
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.2554076 0.5924611
+# sample estimates:
+#       cor
+# 0.4392649
+
+cor.test(pca[,1],cells$Endothelial)
+#         Pearson's product-moment correlation
+# 
+# data:  pca[, 1] and cells$Endothelial
+# t = 4.7489, df = 88, p-value = 7.885e-06
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  0.2698009 0.6024025
+# sample estimates:
+#       cor
+# 0.4516565
+
+cor.test(pca[,1],cells$nRBC)
+#         Pearson's product-moment correlation
+# 
+# data:  pca[, 1] and cells$nRBC
+# t = -0.29985, df = 88, p-value = 0.765
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.2374673  0.1763103
+# sample estimates:
+#        cor
+# -0.0319473
+
+cor.test(pca[,1],cells$Syncytiotrophoblast)
+#         Pearson's product-moment correlation
+# 
+# data:  pca[, 1] and cells$Syncytiotrophoblast
+# t = -122.83, df = 88, p-value < 2.2e-16
+# alternative hypothesis: true correlation is not equal to 0
+# 95 percent confidence interval:
+#  -0.9980917 -0.9955829
+# sample estimates:
+#        cor
+# -0.9970963
+
+
+summary(lm(meanDNAm ~ Trophoblasts + Stromal + Hofbauer + Endothelial + nRBC + Syncytiotrophoblast, data=pd.cov))
+                    Estimate Std. Error t value Pr(>|t|)
+(Intercept)          52.7415     0.3484 151.383  < 2e-16 ***
+Trophoblasts          6.2440     1.5550   4.016 0.000128 ***
+Stromal              -4.7514     2.0594  -2.307 0.023508 *
+Hofbauer             17.3878     6.2409   2.786 0.006592 **
+Endothelial         -11.4084     3.5512  -3.213 0.001866 **
+nRBC                -18.0175    12.3352  -1.461 0.147839
+Syncytiotrophoblast       NA         NA      NA       NA
+
+
+summary(lm(meanDNAm ~ Trophoblasts + Stromal + Hofbauer + Endothelial + nRBC, data=pd.cov))
+(Intercept)   52.7415     0.3484 151.383  < 2e-16 ***
+Trophoblasts   6.2440     1.5550   4.016 0.000128 ***
+Stromal       -4.7514     2.0594  -2.307 0.023508 *
+Hofbauer      17.3878     6.2409   2.786 0.006592 **
+Endothelial  -11.4084     3.5512  -3.213 0.001866 **
+nRBC         -18.0175    12.3352  -1.461 0.147839
+
+summary(lm(meanDNAm ~ Stromal + Hofbauer + Endothelial + nRBC + Syncytiotrophoblast, data=pd.cov))
+                    Estimate Std. Error t value Pr(>|t|)
+(Intercept)           58.985      1.435  41.114  < 2e-16 ***
+Stromal              -10.995      2.268  -4.848 5.65e-06 ***
+Hofbauer              11.144      6.889   1.618 0.109492
+Endothelial          -17.652      4.230  -4.173 7.29e-05 ***
+nRBC                 -24.262     12.020  -2.018 0.046741 *
+Syncytiotrophoblast   -6.244      1.555  -4.016 0.000128 ***
+
+
+summary(lm(meanDNAm ~ Trophoblasts, data=pd.cov))
+#              Estimate Std. Error t value Pr(>|t|)
+# (Intercept)   52.2410     0.2648  197.28  < 2e-16 ***
+# Trophoblasts   6.2562     1.6209    3.86 0.000216 ***
+summary(lm(meanDNAm ~ Stromal, data=pd.cov))
+#             Estimate Std. Error t value Pr(>|t|)
+# (Intercept)  53.4887     0.2174 246.016   <2e-16 ***
+# Stromal      -3.3287     1.9528  -1.705   0.0918 .
+summary(lm(meanDNAm ~ Hofbauer, data=pd.cov))
+#             Estimate Std. Error t value Pr(>|t|)
+# (Intercept)  52.5954     0.2429 216.510  < 2e-16 ***
+# Hofbauer     12.6922     4.7243   2.687  0.00863 **
+summary(lm(meanDNAm ~ Endothelial, data=pd.cov))
+#             Estimate Std. Error t value Pr(>|t|)
+# (Intercept)  53.8460     0.2637 204.202  < 2e-16 ***
+# Endothelial -10.7644     3.8252  -2.814  0.00603 **
+summary(lm(meanDNAm ~ nRBC, data=pd.cov))
+#             Estimate Std. Error t value Pr(>|t|)
+# (Intercept)  53.0938     0.1372 387.050   <2e-16 ***
+# nRBC         11.0958    10.1107   1.097    0.275
+summary(lm(meanDNAm ~ Syncytiotrophoblast, data=pd.cov))
+#                     Estimate Std. Error t value Pr(>|t|)
+# (Intercept)          54.0303     0.6948   77.76   <2e-16 ***
+# Syncytiotrophoblast  -1.3355     1.0686   -1.25    0.215
+
+
+
+```
+# MARBLES Processing
+
+## Load preprocessed data and covariates
+
+```{r}
+pd.cov <- readRDS(file.path(res.path,'QC/pd.rds'))
+beta <- readRDS(file.path(res.path,'QC/beta.rds'))
+
+#epic.pc <- readRDS(file.path(res.path,'EPIC_SNP_PC.rds'))
+
+supp <- read.sas7bdat('/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/Placenta_Supp/e_m_vit_supp_20190411.sas7bdat')
+```
+
+## Get supplement
+
+```{r}
+supp <- supp[match(pd.cov$COI_ID, supp$coi_id),]
+pd.cov$PVmo1 <- supp$PV_YN_MO1
+
+# identical(rownames(pd.cov), rownames(epic.pc$x))
+# pd.cov$pce1 <- epic.pc$x[,1]
+# pd.cov$pce2 <- epic.pc$x[,2]
+# pd.cov$pce3 <- epic.pc$x[,3]
+# pd.cov$pce4 <- epic.pc$x[,4]
+# pd.cov$pce5 <- epic.pc$x[,5]
+
+```
+
+# model fitting
+```{r models}
+library(qqman)
+library(limma)
+
+### no missing, no smokers
+
+#get rid of smoking
+pd.mod <- pd.cov[pd.cov$smk_preg!=1,]
+
+#get rid missing
+pd.mod <- pd.mod[,c('COI_ID', 'PVmo1', 'mom_edu_bn', 'pc1', 'pc2', 'pc3', 'pc4', 'pc5',
+                    'sex', 'mom_age', 'gest_age', 'Trophoblasts','Stromal','Hofbauer','Endothelial','nRBC','Syncytiotrophoblast')]
+pd.mod <- na.omit(pd.mod)
+
+nrow(pd.cov) #92
+nrow(pd.mod) #70 #87 with EPIC SNP pcs
+
+#put back in vars only for descriptive purposes
+pd.mod$ancest_cat <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'ancest_cat']
+pd.mod$meanDNAm.sea <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'meanDNAm.sea']
+pd.mod$meanDNAm.shelf <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'meanDNAm.shelf']
+pd.mod$meanDNAm.shore <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'meanDNAm.shore']
+pd.mod$meanDNAm.island <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'meanDNAm.island']
+pd.mod$meanDNAm <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'meanDNAm']
+
+pd.mod$Trophoblasts <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'Trophoblasts'] * 100
+pd.mod$Stromal <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'Stromal'] * 100
+pd.mod$Hofbauer <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'Hofbauer'] * 100
+pd.mod$Endothelial <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'Endothelial'] * 100
+pd.mod$nRBC <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'nRBC'] * 100
+pd.mod$Syncytiotrophoblast <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'Syncytiotrophoblast'] * 100
+
+### table 1
+library(compareGroups)
+
+restab <- compareGroups(PVmo1 ~ mom_edu_bn + ancest_cat + mom_age +
+                           sex + gest_age + Trophoblasts + Stromal + Hofbauer + Endothelial + nRBC + Syncytiotrophoblast +
+                          meanDNAm + meanDNAm.sea + meanDNAm.shelf + meanDNAm.shore + meanDNAm.island,
+                        data=pd.mod, method=c(ancest_cat=3))
+
+
+tab1 <- createTable(restab)
+export2word(tab1, file=file.path(res.path,'PV/table1.docx'))
+
+
+#### model
+mod <- model.matrix(~factor(pd.mod$PVmo1) + pd.mod$sex + pd.mod$mom_age + pd.mod$gest_age + pd.mod$mom_edu_bn + pd.mod$pc1 + pd.mod$pc2 + pd.mod$pc3 + pd.mod$pc4 + pd.mod$pc5 + pd.mod$Syncytiotrophoblast + pd.mod$Hofbauer)
+out <- lmFit(beta[,rownames(pd.mod)],mod)
+out <- eBayes(out)
+ss.hits.pv <- topTable(out, coef=2, number=nrow(beta))
+
+lambda <- qchisq(median(ss.hits.pv$P.Value, na.rm=T), df = 1, lower.tail = F) / qchisq(0.5, 1)
+
+png(file.path(res.path,'PV/QQ_pv_mo1.png'))
+  qq(ss.hits.pv$P.Value,main=paste0("Lambda = ", round(lambda,3)))
+dev.off()
+
+saveRDS(ss.hits.pv, file=file.path(res.path,"PV/model_results_pv_mo1.rds"))
+
+
+### write table
+
+setwd(file.path(res.path,"PV"))
+source("/dcl01/NDEpi/data/Projects/InProgress/jdou/Folate/EARLI_folate_intake_functions.R")
+
+ss.pv <- append.annotate(ss.hits.pv, what=c("chr","pos","gene"), array="EPIC")
+
+nice.format <- function(ss.hits){
+  ss.hits$sd <- ss.hits$logFC/ss.hits$t
+  ss.hits <- ss.hits[,c("chr","pos","logFC","sd","P.Value","adj.P.Val","gene","AveExpr")]
+  names(ss.hits) <- c("chr","pos","DNAm_diff","sd","P.Value","adj.P.Val","gene","AveDNAm")
+  ss.hits$DNAm_diff <- signif(ss.hits$DNAm_diff*100,4)
+  ss.hits$sd <- signif(ss.hits$sd*100,4)
+  ss.hits$P.Value <- signif(ss.hits$P.Value, 3)
+  ss.hits$adj.P.Val <- round(ss.hits$adj.P.Val,2)
+  ss.hits$AveDNAm <- round(ss.hits$AveDNAm*100,2)
+  ss.hits$gene <- gsub(";.*","",ss.hits$gene)
+  ss.hits$gene <- paste0(" ", ss.hits$gene)
+  ss.hits
+}
+
+ss.pv.fmt <- nice.format(ss.pv)
+
+write.csv(ss.pv.fmt, file="Supplementary Table 2 - MARBLES Placenta Single Site Results.csv")
+```
+
+
+## DMRcate
+```{r}
+library(DMRcate)
+
+mod <- model.matrix(~factor(pd.mod$PVmo1) + pd.mod$sex + pd.mod$mom_age + pd.mod$gest_age + pd.mod$mom_edu_bn + pd.mod$pc1 + pd.mod$pc2 + pd.mod$pc3 + pd.mod$pc4 + pd.mod$pc5 + pd.mod$Epi + pd.mod$IC)
+
+dmr.anno <- cpg.annotate("array", beta[,rownames(pd.mod)], arraytype="EPIC", analysis.type="differential", design=mod, coef=2)
+dmr.out <- dmrcate(dmr.anno, lambda=1000, C=2, pcutoff=1e-4)
+dmr.range <- extractRanges(dmr.out)
+
+setwd(file.path(res.path,"PV"))
+saveRDS(dmr.range, file="dmrcatePV.rds")
+
+```
+
+## single site results visualization
+```{r ss visual}
+setwd(file.path(res.path,"PV"))
+ss.hits.pv <- readRDS("model_results_pv_mo1.rds")
+
+
+plot.volcano <- function(ss.hits,main=NULL){
+  par(mar=c(5,5,3,3))
+  
+  #get betas and pvals from single sites results
+  betas <- ss.hits$logFC
+  pvals <- -log(ss.hits$P.Value,10)
+  
+  #assign colors
+  pcol <- ifelse(pvals < -log(0.05,10), 'darkslategrey', ifelse(betas>0,'cadetblue4','cadetblue3'))
+  
+  #get percent hyper/hypo for sites above threshold
+  total <- table(pcol)['cadetblue4'] + table(pcol)['cadetblue3']
+  pct <- c(round(table(pcol)['cadetblue4']/total * 100,1),round(table(pcol)['cadetblue3']/total * 100,1))
+  
+  #plotting stuff
+  plot(betas,pvals, las=1, main=main, xlab=paste0('Effect Estimate'), ylab=expression('-Log'[10]*'(P-Value)'),
+       xlim=c(-0.46,0.46),ylim=c(0,7),cex.axis=1.4,cex.lab=1.4,cex.main=1.4,cex=0.7,pch=21,col=pcol)
+  abline(h=-log(0.05,10),col='blue')
+  abline(h=7,col='red')
+  text(0.3,6,paste0(pct[1],'%'),col='cadetblue4',cex=2.2)
+  text(-0.3,6,paste0(pct[2],'%'),col='cadetblue3',cex=2.2)
+}
+
+
+png("volcano_pv_mo1.png")
+  plot.volcano(ss.hits.pv)
+dev.off()
+
+
+
+### manhattan plots
+
+#append chr and bp info
+data(Locations)
+
+ss.hits.pv <- ss.hits.pv[rownames(ss.hits.pv) %in% rownames(Locations), ]
+
+ss.hits.pv$CHR <- Locations[rownames(ss.hits.pv),"chr"]
+ss.hits.pv$BP <- Locations[rownames(ss.hits.pv),"pos"]
+ss.hits.pv$CHR <- as.numeric(gsub("chr","",ss.hits.pv$CHR))
+
+png("manhattan_pv_mo1.png")
+  manhattan(ss.hits.pv, p="P.Value")
+dev.off()
+```
+
+
+# pathway analysis
+```{r pathway}
+library(missMethyl)
+
+setwd(file.path(res.path,"PV"))
+ss.hits.pv <- readRDS("model_results_pv_mo1.rds")
+
+table(ss.hits.pv$P.Value<0.01) #9563
+
+top.pv <- rownames(ss.hits.pv[ss.hits.pv$P.Value<0.01, ])
+
+mm.pv <- gometh(sig.cpg=top.pv, all.cpg=rownames(ss.hits.pv), collection="GO", array.type="EPIC")
+
+
+path.pv <- topGSA(mm.pv, number=nrow(mm.pv))
+
+path.pv <- path.pv[path.pv$ONTOLOGY=='BP',]
+
+write.csv(path.pv, file="pathway_pv_mo1_EPIC_PC.csv")
+```
+
+
+# global 
+```{r global}
+globalRegions <- function(pd, x, adj=NULL, summary.name){
+  #set up blank results
+  regions <- c('meanDNAm','meanDNAm.sea','meanDNAm.shore','meanDNAm.shelf','meanDNAm.island')
+  fits <- list()
+  fits[regions] <- NA
+  results <- matrix(NA, nrow=5, ncol=4)
+  rownames(results) <- regions
+  colnames(results) <- c('est', 'std_err', 't', 'p')
+  
+  #do linear model for each region
+  for(region in regions){
+    eqn <- paste0(region, '~', x, '+', adj)
+    fits[[region]] <- lm(as.formula(eqn), data=pd)
+    results[region,] <- summary(fits[[region]])$coefficients[2,]
+  }
+  
+  #print out summaries
+  sink(paste0(summary.name,'.txt'), append=TRUE)
+  print(lapply(fits, summary))
+  sink()
+  
+  return(results)
+}
+
+pd.mod$PVmo1 <- factor(pd.mod$PVmo1)
+
+PV_all <- globalRegions(pd.mod, x='PVmo1', adj='sex + mom_age + gest_age + mom_edu_bn + pc1 + pc2 + pc3 + pc4 + pc5 + Syncytiotrophoblast + Hofbauer', summary.name='PV_all')
+
+saveRDS(PV_all, file='global_pv.rds')
+
+PV_M <- globalRegions(pd.mod[pd.mod$sex=='F',], x='PVmo1', adj='mom_age + gest_age + mom_edu_bn + pc1 + pc2 + pc3 + pc4 + pc5 + Syncytiotrophoblast + Hofbauer', summary.name='PV_all')
+
+PV_F <- globalRegions(pd.mod[pd.mod$sex=='M',], x='PVmo1', adj='mom_age + gest_age + mom_edu_bn + pc1 + pc2 + pc3 + pc4 + pc5 + Syncytiotrophoblast + Hofbauer', summary.name='PV_all')
+
+```
+
+#PV_M
+n=46
+                       est   std_err          t          p
+meanDNAm        -1.2050813 0.6203822 -1.9424822 0.07591534
+meanDNAm.sea    -1.4780358 0.8433075 -1.7526654 0.10514515
+meanDNAm.shore  -1.0458585 0.6156097 -1.6988987 0.11509172
+meanDNAm.shelf  -1.3394339 0.7267684 -1.8429995 0.09015693
+meanDNAm.island -0.4848116 0.5340632 -0.9077794 0.38186345
+
+
+#PV_F
+n=24
+                       est   std_err          t         p
+meanDNAm        -0.2948260 0.3763305 -0.7834231 0.4388022
+meanDNAm.sea    -0.2924718 0.4842973 -0.6039097 0.5499122
+meanDNAm.shore  -0.3814163 0.3842411 -0.9926483 0.3278937
+meanDNAm.shelf  -0.3448533 0.4832212 -0.7136551 0.4803110
+meanDNAm.island -0.2001914 0.2250132 -0.8896873 0.3798859
