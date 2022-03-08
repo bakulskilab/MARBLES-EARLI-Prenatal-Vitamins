@@ -1,0 +1,686 @@
+---
+title: "Probe and Sample Filtering"
+output: html_document
+---
+
+```{r library, message=F, warning=F}
+library(minfi)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(sas7bdat)
+library(openxlsx)
+ 
+
+```
+
+# EARLI Cord Processing
+
+## Load preprocessed data and covariates
+
+```{r}
+res.path <- "/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/EARLI_cord/"
+
+#load noob data
+load("/dcl01/NDEpi/data/Projects/InProgress/kbakulsk/kbakulsk/EARLI/450k-round2/Noob-beta-All-Samples-EARLI-both-rounds.rda")
+
+#load pd
+load("/dcl01/NDEpi/data/MasterCohortData/EARLI/EARLIBiologicalSamples/450k/EARLI_450k_all1155samples_pd_with_ancestry.rda")
+load("/dcl01/NDEpi/data/MasterCohortData/EARLI/EARLIBiologicalSamples/450k/earli.450k.pd.N=1225.20161117.rda")
+
+interview <- read.csv("/dcl01/NDEpi/data/MasterCohortData/EARLI/EARLISelfReportedInterviewData/Data Extraction Codebook 20150203_export_20150203_1422987480_wide_20150204_1423070501.csv")
+covars <- read.sas7bdat("/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/e_m_covars_v5_20191115.sas7bdat")
+
+```
+
+## Sample and Probe QC filtering
+
+```{r}
+### samp dropping
+
+#get the cord blood
+pd.cord <- pd[pd$Tissue=='Cord.Blood',]
+pd.cord <- merge(pd.cord,pd.ancest[,c('Tissue.Cat','predictedSex')],by='row.names',sort=FALSE)
+rownames(pd.cord) <- pd.cord$Row.names
+nrow(pd.cord) #175
+
+#remove multiple births
+multi <- pd.cord[duplicated(pd.cord$DCC_Family_ID),"DCC_Family_ID"]
+pd.cord <- pd.cord[!pd.cord$DCC_Family_ID %in% multi,]
+nrow(pd.cord) #173
+
+#drop those with discordant predicted and observed sex
+discordant.sex <- pd.cord[!is.na(pd.cord$Sex) & pd.cord$Sex != pd.cord$predictedSex,]
+nrow(discordant.sex) # 1
+pd.cord <- pd.cord[!rownames(pd.cord)%in%rownames(discordant.sex),]
+nrow(pd.cord) #170
+
+
+
+### probe dropping
+
+#drop poor detection probes
+load('/dcl01/NDEpi/data/Projects/InProgress/kbakulsk/kbakulsk/EARLI/450k-round2/Failed-Probes-By-DetP-01.rda')
+pd.cord$detp_fail_pct <- colMeans(probe.fail[,rownames(pd.cord)])
+bad.probe <- rowMeans(probe.fail)
+bad.probe <- bad.probe[bad.probe>0.05]
+length(bad.probe) #661 failed probes
+noob.beta <- noob.beta[!(rownames(noob.beta)%in%names(bad.probe)),]
+rm(bad.probe)
+nrow(noob.beta) #484851
+
+#drop cross reactive
+cross <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/48639-non-specific-probes-Illumina450k.csv", stringsAsFactors=FALSE)
+noob.beta <- noob.beta[!rownames(noob.beta)%in%cross$TargetID,]
+rm(cross)
+nrow(noob.beta) #455698
+
+#drop Y probes
+sex <- Locations[Locations$chr %in% c('chrY'), ]
+noob.beta <- noob.beta[!rownames(noob.beta) %in% rownames(sex), ]
+dim(noob.beta) #455650
+
+
+
+#select samps
+noob.beta <- noob.beta[,rownames(pd.cord)]
+
+
+#extract interview data for samples
+interview.fam <- interview[interview$Family_ID %in% pd.cord$DCC_Family_ID,]
+questions <- c('EARLI_HB_smoke')
+interview.q <- interview.fam[,c('Family_ID',questions)]
+interview.q <- interview.q[match(pd.cord$DCC_Family_ID, interview.q$Family_ID),]
+
+table(pd.cord$Subject.ID %in% covars$coi_id)
+covars <- covars[match(pd.cord$Subject.ID, covars$coi_id), ]
+
+
+#drop X probes
+sex <- Locations[Locations$chr %in% c('chrX','chrY'), ]
+beta.glob <- noob.beta[!rownames(noob.beta) %in% rownames(sex), ]
+dim(beta.glob) #445241
+
+### create globalDNAm 
+source("/dcl01/NDEpi/data/Projects/InProgress/jdou/Folate/EARLI_folate_intake_functions.R")
+
+pd.cord$meanDNAm <- colMeans(beta.glob)*100
+pd.cord$meanDNAm.sea <- colMeans(genomic.region(beta.glob,region='OpenSea',anno='450k'))*100
+pd.cord$meanDNAm.shore <- colMeans(genomic.region(beta.glob,region='Shore',anno='450k'))*100
+pd.cord$meanDNAm.shelf <- colMeans(genomic.region(beta.glob,region='Shelf',anno='450k'))*100
+pd.cord$meanDNAm.island <- colMeans(genomic.region(beta.glob,region='Island',anno='450k'))*100
+
+
+```
+
+## Get covariates formatted
+
+```{r covar format}
+#set up data frame with model variables
+pd.cov <- data.frame(COI_ID = pd.cord$Subject.ID)
+rownames(pd.cov) <- pd.cord$Row.names
+
+#asd
+pd.cov$asd <- covars$Dx_alg
+
+#mat edu
+pd.cov$mom_edu <- covars$MomEdu
+pd.cov$mom_edu_bn <- ifelse(pd.cov$mom_edu<4, "No Degree", "College Degree")
+pd.cov$mom_edu_bn <- factor(pd.cov$mom_edu_bn, levels=c("No Degree","College Degree"))
+
+#maternal age
+pd.cov$mom_age <- covars$MomAgeYr
+
+#gest age
+pd.cov$gest_age <- covars$GA_deliv_wks
+
+#mat smk
+pd.cov$smk_preg <- interview.q$EARLI_HB_smoke
+pd.cov$smk_preg <- factor(pd.cov$smk_preg)
+
+#ancestry
+pd.cov$ancest_cat <- pd.cord$popid.questionnaire
+pcs <- pd.cord[,which(colnames(pd.cord)=='PC1'):which(colnames(pd.cord)=='PC10')]
+pd.cov <- cbind(pd.cov, pcs)
+
+#sex
+pd.cov$sex <- pd.cord$predictedSex
+
+#cell type
+cell.est <- readRDS("/dcl01/NDEpi/data/Projects/InProgress/jdou/Cell_Est/earl_cell_est_combi_idol.rds")
+cell.est <- cell.est[rownames(pd.cov),]
+identical(rownames(pd.cov), rownames(cell.est))
+pd.cov <- cbind(pd.cov,cell.est)
+
+#global DNAm
+pd.cov$meanDNAm <- pd.cord$meanDNAm
+pd.cov$meanDNAm.sea <- pd.cord$meanDNAm.sea
+pd.cov$meanDNAm.shore <- pd.cord$meanDNAm.shore
+pd.cov$meanDNAm.shelf <- pd.cord$meanDNAm.shelf
+pd.cov$meanDNAm.island <- pd.cord$meanDNAm.island
+
+
+saveRDS(pd.cov, file.path(res.path,'QC/pd.rds'))
+saveRDS(noob.beta, file.path(res.path,'QC/beta.rds'))
+```
+
+
+
+# EARLI Placenta Processing
+
+## Load preprocessed data and covariates
+
+```{r}
+res.path <- "/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/EARLI_placenta/"
+
+#load noob data
+load("/dcl01/NDEpi/data/Projects/InProgress/kbakulsk/kbakulsk/EARLI/450k-round2/Noob-beta-All-Samples-EARLI-both-rounds.rda")
+
+#load pd
+load("/dcl01/NDEpi/data/MasterCohortData/EARLI/EARLIBiologicalSamples/450k/EARLI_450k_all1155samples_pd_with_ancestry.rda")
+load("/dcl01/NDEpi/data/MasterCohortData/EARLI/EARLIBiologicalSamples/450k/earli.450k.pd.N=1225.20161117.rda")
+
+interview <- read.csv("/dcl01/NDEpi/data/MasterCohortData/EARLI/EARLISelfReportedInterviewData/Data Extraction Codebook 20150203_export_20150203_1422987480_wide_20150204_1423070501.csv")
+covars <- read.sas7bdat("/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/e_m_covars_v5_20191115.sas7bdat")
+
+```
+
+## Sample and Probe QC filtering
+
+```{r}
+### samp dropping
+
+#placenta
+pd.placenta <- pd[pd$Tissue=='placenta',]
+pd.placenta$predictedSex <- pd.ancest[rownames(pd.placenta),'predictedSex']
+pd.plc <- pd.placenta[pd.placenta$Phenotype=='placenta.child',]
+nrow(pd.plc) #134
+
+#remove multiple births
+multi <- pd.plc[duplicated(pd.plc$DCC_Family_ID),"DCC_Family_ID"]
+pd.plc <- pd.plc[!pd.plc$DCC_Family_ID %in% multi,]
+nrow(pd.plc) #128
+
+#drop those with discordant predicted and observed sex
+discordant.sex <- pd.plc[!is.na(pd.plc$Sex) & pd.plc$Sex != pd.plc$predictedSex,]
+nrow(discordant.sex) # 1
+pd.plc <- pd.plc[!rownames(pd.plc)%in%rownames(discordant.sex),]
+nrow(pd.plc) #127
+
+
+
+### probe dropping
+
+#drop poor detection probes
+load('/dcl01/NDEpi/data/Projects/InProgress/kbakulsk/kbakulsk/EARLI/450k-round2/Failed-Probes-By-DetP-01.rda')
+pd.plc$detp_fail_pct <- colMeans(probe.fail[,rownames(pd.plc)])
+bad.probe <- rowMeans(probe.fail)
+rm(probe.fail)
+bad.probe <- bad.probe[bad.probe>0.05]
+length(bad.probe) #661 failed probes
+noob.beta <- noob.beta[!(rownames(noob.beta)%in%names(bad.probe)),]
+nrow(noob.beta) #484851
+
+#drop cross reactive
+cross <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/48639-non-specific-probes-Illumina450k.csv", stringsAsFactors=FALSE)
+noob.beta <- noob.beta[!rownames(noob.beta)%in%cross$TargetID,]
+rm(cross)
+nrow(noob.beta) #455698
+
+#drop sex probes
+sex <- Locations[Locations$chr %in% c('chrY'), ]
+noob.beta <- noob.beta[!rownames(noob.beta) %in% rownames(sex), ]
+dim(noob.beta) #455650   
+
+
+#select samps
+noob.beta <- noob.beta[,rownames(pd.plc)]
+
+rm(multi, pd, pd.ancest, pd.placenta)
+
+
+
+#extract interview data for samples
+interview.fam <- interview[interview$Family_ID %in% pd.plc$DCC_Family_ID,]
+questions <- c('EARLI_HB_smoke')
+interview.q <- interview.fam[,c('Family_ID',questions)]
+interview.q <- interview.q[match(pd.plc$DCC_Family_ID, interview.q$Family_ID),]
+
+table(pd.plc$Subject.ID %in% covars$coi_id)
+covars <- covars[match(pd.plc$Subject.ID, covars$coi_id), ]
+
+
+#drop sex probes
+sex <- Locations[Locations$chr %in% c('chrX'), ]
+beta.glob <- noob.beta[!rownames(noob.beta) %in% rownames(sex), ]
+dim(beta.glob)  
+
+
+### create globalDNAm 
+source("/dcl01/NDEpi/data/Projects/InProgress/jdou/Folate/EARLI_folate_intake_functions.R")
+
+pd.plc$meanDNAm <- colMeans(beta.glob)*100
+pd.plc$meanDNAm.sea <- colMeans(genomic.region(beta.glob,region='OpenSea',anno='450k'))*100
+pd.plc$meanDNAm.shore <- colMeans(genomic.region(beta.glob,region='Shore',anno='450k'))*100
+pd.plc$meanDNAm.shelf <- colMeans(genomic.region(beta.glob,region='Shelf',anno='450k'))*100
+pd.plc$meanDNAm.island <- colMeans(genomic.region(beta.glob,region='Island',anno='450k'))*100
+```
+
+## Get covariates formatted
+
+```{r covar format}
+#set up data frame with model variables
+pd.cov <- data.frame(COI_ID = pd.plc$Subject.ID)
+rownames(pd.cov) <- pd.plc$Row.names
+
+#asd
+pd.cov$asd <- covars$Dx_alg
+
+#mat edu
+pd.cov$mom_edu <- covars$MomEdu
+pd.cov$mom_edu_bn <- ifelse(pd.cov$mom_edu<4, "No Degree", "College Degree")
+pd.cov$mom_edu_bn <- factor(pd.cov$mom_edu_bn, levels=c("No Degree","College Degree"))
+
+#maternal age
+pd.cov$mom_age <- covars$MomAgeYr
+
+#gest age
+pd.cov$gest_age <- covars$GA_deliv_wks
+
+#mat smk
+pd.cov$smk_preg <- interview.q$EARLI_HB_smoke
+pd.cov$smk_preg <- factor(pd.cov$smk_preg)
+
+#ancestry
+pd.cov$ancest_cat <- pd.plc$popid.questionnaire
+pcs <- pd.plc[,which(colnames(pd.plc)=='PC1'):which(colnames(pd.plc)=='PC10')]
+pd.cov <- cbind(pd.cov, pcs)
+
+#sex
+pd.cov$sex <- pd.plc$Sex
+
+#cell type
+library(EpiDISH)
+library(planet)
+data('plCellCpGsThird')
+out.l <- epidish(beta.m = noob.beta, ref.m = plCellCpGsThird, method = "RPC") 
+cell.est <- out.l$estF
+#saveRDS(cell.est, file="/dcl01/NDEpi/data/Projects/InProgress/jdou/Cell_Est/earl_placenta_epidish_planet.rds")
+identical(rownames(pd.cov), rownames(cell.est))
+pd.cov <- cbind(pd.cov,cell.est)
+
+#global DNAm
+pd.cov$meanDNAm <- pd.plc$meanDNAm
+pd.cov$meanDNAm.sea <- pd.plc$meanDNAm.sea
+pd.cov$meanDNAm.shore <- pd.plc$meanDNAm.shore
+pd.cov$meanDNAm.shelf <- pd.plc$meanDNAm.shelf
+pd.cov$meanDNAm.island <- pd.plc$meanDNAm.island
+
+
+saveRDS(pd.cov, file.path(res.path,'QC/pd.rds'))
+saveRDS(noob.beta, file.path(res.path,'QC/beta.rds'))
+```
+
+
+
+```{r libraryM, message=F, warning=F}
+library(minfi)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+library(sas7bdat)
+library(openxlsx)
+library(dplyr)
+```
+
+# MARBLES  Cord Processing
+
+## Load preprocessed data and covariates
+
+```{r}
+res.path <- "/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_cord/"
+
+setwd("/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES_EPIC_blood/QC/")
+noob.beta <- readRDS("noob_beta.rds")
+pd <- readRDS("qc_04_snp.rds")
+
+detp <- readRDS("probe_fail_noY.rds")
+cross <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/cross_probes_info_EPIC_Pidsley_2016.csv")
+flag <- read.xlsx('/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES_EPIC_blood/flagged_samples.xlsx')
+ 
+marb_cov <- read.sas7bdat("/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/marbles_allcov_09mar20.sas7bdat")
+marbearl <- read.sas7bdat("/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/e_m_covars_v4.sas7bdat")
+
+```
+
+
+## Sample and Probe QC filtering
+
+```{r}
+### samp dropping
+
+#this will axe controls
+pd.an <- pd[pd$ew_probe_fail_pct<0.05, ]
+nrow(pd.an) # 279
+
+#drop methylation clock flagged samples
+pd.an$flag_age <- pd.an$COI_ID %in% flag$ID
+pd.an <- pd.an[!pd.an$flag_age,]
+nrow(pd.an) # 247
+
+#multiple births
+table(pd.an$COI_ID %in% marb_cov$COI_ID)
+fam <- marb_cov[match(pd.an$COI_ID, marb_cov$COI_ID), ]
+multi <- fam[duplicated(fam$familyID),"familyID"]
+multi <- multi[!is.na(multi)]
+fam.multi <- fam[fam$familyID %in% multi, c("COI_ID","familyID","Year_DOB","PREGNUM")]
+fam.multi <- fam.multi[order(fam.multi$familyID, fam.multi$PREGNUM),]
+multiple.births <- c("5065","5389","5455","5456")
+pd.an$FAM_ID <- substr(pd.an$COI_ID,1,4)
+pd.an <- pd.an[!pd.an$FAM_ID %in% multiple.births, ]
+nrow(pd.an) # 239
+
+#sex mismatch gone
+pd.an <- pd.an[is.na(pd.an$COI_GENDER) | !(pd.an$COI_GENDER=="M" & pd.an$predicted_sex=="f"), ]
+nrow(pd.an) # 236
+
+#keep one of related siblings
+sib <- pd.an[duplicated(pd.an$FAM_ID),"FAM_ID"]
+pd.an <- pd.an %>% group_by(FAM_ID) %>%
+  filter(ew_probe_fail_pct == min(ew_probe_fail_pct))
+pd.an <- data.frame(pd.an)
+rownames(pd.an) <- pd.an$meth_id
+nrow(pd.an) #223
+
+
+
+### probe dropping
+
+beta <- noob.beta[rownames(noob.beta) %in% rownames(Locations), ]
+dim(beta) #865859
+
+#drop detp fail probes
+bad <- detp[detp>0.05]
+beta <- beta[!rownames(beta) %in% names(bad), ]
+dim(beta) #861229
+
+#drop cross probes
+beta <- beta[!rownames(beta) %in% cross$Probe, ]
+dim(beta) #818262    286
+
+#drop sex probes
+sex <- Locations[Locations$chr %in% c('chrY'), ]
+beta <- beta[!rownames(beta) %in% rownames(sex), ]
+dim(beta) #817883    286
+
+
+#select samps
+beta <- beta[,match(rownames(pd.an), colnames(beta))]
+
+rm(bad, cross, detp)
+
+
+### select from covars data
+cov <- marb_cov[match(pd.an$COI_ID, marb_cov$COI_ID),]
+
+
+
+
+### create globalDNAm 
+source("/dcl01/NDEpi/data/Projects/InProgress/jdou/Folate/EARLI_folate_intake_functions.R")
+
+#drop X probes
+sex <- Locations[Locations$chr %in% c('chrX'), ]
+beta.glob <- beta[!rownames(beta) %in% rownames(sex), ]
+dim(beta) #800191    286
+
+pd.an$meanDNAm <- colMeans(beta.glob)*100
+pd.an$meanDNAm.sea <- colMeans(genomic.region(beta.glob,region='OpenSea',anno='EPIC'))*100
+pd.an$meanDNAm.shore <- colMeans(genomic.region(beta.glob,region='Shore',anno='EPIC'))*100
+pd.an$meanDNAm.shelf <- colMeans(genomic.region(beta.glob,region='Shelf',anno='EPIC'))*100
+pd.an$meanDNAm.island <- colMeans(genomic.region(beta.glob,region='Island',anno='EPIC'))*100
+```
+
+
+## Get covariates formatted
+
+```{r covar format}
+#set up data frame with model variables
+pd.cov <- data.frame(COI_ID = pd.an$COI_ID)
+rownames(pd.cov) <- pd.an$meth_id
+
+#ASD
+table(cov$Dx_alg, exclude=NULL)
+table(cov$dxalg_flag)
+pd.cov$dx_alg <- cov$Dx_alg
+pd.cov$dx_flag <- cov$dxalg_flag
+
+#maternal age
+summary(cov$MomAgeYr)
+pd.cov$mom_age <- cov$MomAgeYr
+class(pd.cov$mom_age)
+
+#gest age
+summary(cov$GA_Deliv_wk)
+pd.cov$gest_age <- cov$GA_Deliv_wk
+
+#mat edu
+table(cov$MomEdu, exclude=NULL)
+pd.cov$mom_edu <- cov$MomEdu
+pd.cov$mom_edu_bn <- ifelse(pd.cov$mom_edu<4, "No Degree", "College Degree")
+pd.cov$mom_edu_bn <- factor(pd.cov$mom_edu_bn, levels=c("No Degree","College Degree"))
+
+#mat smk
+table(cov$SmokeYN_Pregnancy, exclude=NULL)
+pd.cov$smk_preg <- cov$SmokeYN_Pregnancy
+pd.cov$smk_preg <- factor(pd.cov$smk_preg)
+
+#ancestry
+table(cov$ChildRace, cov$ChildHisp, exclude=NULL)
+pd.cov$race <- cov$ChildRace
+pd.cov$eth <- cov$ChildHisp
+pd.cov$ancest_cat <- ifelse(is.na(pd.cov$race), NA, 
+                            ifelse(pd.cov$race==1 & pd.cov$eth==0, "euro", 
+                                   ifelse(pd.cov$eth %in% c(1,2), "hisp", "other")))
+pcs <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/MARBLES-clean-chr1to22-GWAdata.pca.csv", header=T)
+pcs$COI_ID <- substr(pcs$gid,1,6)
+pcs <- pcs[match(pd.cov$COI_ID, pcs$COI_ID),]
+pd.cov <- cbind(pd.cov, pcs[,2:11])
+
+#sex
+pd.cov$sex <- pd.an$COI_GENDER
+
+#cell type
+cell.est <- readRDS("/dcl01/NDEpi/data/Projects/InProgress/jdou/Cell_Est/marb_cell_est_combi_idol.rds")
+cell.est <- cell.est[rownames(pd.cov),]
+identical(rownames(pd.cov), rownames(cell.est))
+pd.cov <- cbind(pd.cov,cell.est)
+
+#global DNAm
+pd.cov$meanDNAm <- pd.an$meanDNAm
+pd.cov$meanDNAm.sea <- pd.an$meanDNAm.sea
+pd.cov$meanDNAm.shore <- pd.an$meanDNAm.shore
+pd.cov$meanDNAm.shelf <- pd.an$meanDNAm.shelf
+pd.cov$meanDNAm.island <- pd.an$meanDNAm.island
+
+saveRDS(pd.cov, file.path(res.path,'QC/pd.rds'))
+saveRDS(beta, file.path(res.path,'QC/beta.rds'))
+```
+
+
+# MARBLES Placenta Processing
+
+## Load preprocessed data and covariates
+
+```{r}
+res.path <- "/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_placenta/"
+
+load("/dcl01/NDEpi/data/Projects/InProgress/jdou/EPIC_Placenta_Preprocess/pd.info.rda")
+load("/dcl01/NDEpi/data/Projects/InProgress/jdou/EPIC_Placenta_Preprocess/untouched.noob.rda")
+
+data(Locations)
+load("/dcl01/NDEpi/data/Projects/InProgress/jdou/EPIC_Placenta_Preprocess/detP.min.rda")
+
+cross <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/cross_probes_info_EPIC_Pidsley_2016.csv")
+
+marb_cov <- read.sas7bdat("/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/marbles_allcov_09mar20.sas7bdat")
+```
+
+## Sample and Probe QC filtering
+
+```{r}
+### samp dropping
+
+#this will axe controls
+pd.an <- pd.info
+nrow(pd.an) # 92
+
+detP.min <- detP.min[,rownames(pd.an)]
+failedP <- detP.min > 0.01
+pd.an$detp_fail_pct <- colMeans(failedP)
+bad.probe <- rowMeans(failedP)
+rm(detP.min, failedP)
+
+#multiple births
+table(pd.an$COI_ID %in% marb_cov$COI_ID)
+fam <- marb_cov[match(pd.an$COI_ID, marb_cov$COI_ID), ]
+multi <- fam[duplicated(fam$familyID),"familyID"]
+multi <- multi[!is.na(multi)]
+fam.multi <- fam[fam$familyID %in% multi, c("COI_ID","familyID","Year_DOB","PREGNUM")]
+fam.multi <- fam.multi[order(fam.multi$familyID, fam.multi$PREGNUM),]
+#none
+
+#sex mismatch gone
+table(pd.an$predictedSex, fam$COI_SEX)
+#none
+
+#keep one of related siblings
+pd.an$FAM_ID <- substr(pd.an$COI_ID,1,4)
+sib <- pd.an[duplicated(pd.an$FAM_ID),"FAM_ID"]
+pd.an <- data.frame(pd.an)
+pd.an <- pd.an %>% group_by(FAM_ID) %>%
+  filter(detp_fail_pct == min(detp_fail_pct))
+pd.an <- data.frame(pd.an)
+rownames(pd.an) <- pd.an$Basename
+nrow(pd.an) #90
+
+
+### probe dropping
+
+beta <- noob[rownames(noob) %in% rownames(Locations), ]
+dim(beta) #865859
+
+#detection p
+bad <- bad.probe[bad.probe>0.05]
+beta <- beta[!rownames(beta) %in% names(bad), ]
+dim(beta) #864160
+
+#drop cross probes
+beta <- beta[!rownames(beta) %in% cross$Probe, ]
+dim(beta) #821092
+
+#drop sex probes
+sex <- Locations[Locations$chr %in% c('chrY'), ]
+beta <- beta[!rownames(beta) %in% rownames(sex), ]
+dim(beta) #821008
+
+
+#select samps
+beta <- beta[,match(rownames(pd.an), colnames(beta))]
+beta.noob <- getBeta(beta)
+beta <- beta.noob
+rm(beta.noob)
+
+### select from covars data
+cov <- marb_cov[match(pd.an$COI_ID, marb_cov$COI_ID),]
+
+
+### create globalDNAm 
+source("/dcl01/NDEpi/data/Projects/InProgress/jdou/Folate/EARLI_folate_intake_functions.R")
+
+#drop X probes
+sex <- Locations[Locations$chr %in% c('chrX'), ]
+beta.glob <- beta[!rownames(beta) %in% rownames(sex), ]
+
+pd.an$meanDNAm <- colMeans(beta.glob)*100
+pd.an$meanDNAm.sea <- colMeans(genomic.region(beta.glob,region='OpenSea',anno='EPIC'))*100
+pd.an$meanDNAm.shore <- colMeans(genomic.region(beta.glob,region='Shore',anno='EPIC'))*100
+pd.an$meanDNAm.shelf <- colMeans(genomic.region(beta.glob,region='Shelf',anno='EPIC'))*100
+pd.an$meanDNAm.island <- colMeans(genomic.region(beta.glob,region='Island',anno='EPIC'))*100
+```
+
+## Get covariates formatted
+
+```{r covar format}
+#set up data frame with model variables
+pd.cov <- data.frame(COI_ID = pd.an$COI_ID)
+rownames(pd.cov) <- pd.an$Basename
+
+#ASD
+table(cov$Dx_alg, exclude=NULL)
+table(cov$dxalg_flag)
+pd.cov$dx_alg <- cov$Dx_alg
+pd.cov$dx_flag <- cov$dxalg_flag
+
+#maternal age
+summary(cov$MomAgeYr)
+pd.cov$mom_age <- cov$MomAgeYr
+class(pd.cov$mom_age)
+
+#gest age
+summary(cov$GA_Deliv_wk)
+pd.cov$gest_age <- cov$GA_Deliv_wk
+
+#mat edu
+table(cov$MomEdu, exclude=NULL)
+pd.cov$mom_edu <- cov$MomEdu
+pd.cov$mom_edu_bn <- ifelse(pd.cov$mom_edu<4, "No Degree", "College Degree")
+pd.cov$mom_edu_bn <- factor(pd.cov$mom_edu_bn, levels=c("No Degree","College Degree"))
+
+#mat smk
+table(cov$SmokeYN_Pregnancy, exclude=NULL)
+pd.cov$smk_preg <- cov$SmokeYN_Pregnancy
+pd.cov$smk_preg <- factor(pd.cov$smk_preg)
+
+#ancestry
+table(cov$ChildRace, cov$ChildHisp, exclude=NULL)
+pd.cov$race <- cov$ChildRace
+pd.cov$eth <- cov$ChildHisp
+pd.cov$ancest_cat <- ifelse(is.na(pd.cov$race), NA, 
+                            ifelse(pd.cov$race==1 & pd.cov$eth==0, "euro", 
+                                   ifelse(pd.cov$eth %in% c(1,2), "hisp", "other")))
+pcs <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/MARBLES-clean-chr1to22-GWAdata.pca.csv", header=T)
+pcs$COI_ID <- substr(pcs$gid,1,6)
+pcs <- pcs[match(pd.cov$COI_ID, pcs$COI_ID),]
+pd.cov <- cbind(pd.cov, pcs[,2:11])
+
+#sex
+pd.cov$sex <- pd.an$predictedSex
+
+#cell type
+library(EpiDISH)
+library(planet)
+data('plCellCpGsThird')
+out.l <- epidish(beta.m = beta, ref.m = plCellCpGsThird, method = "RPC") 
+cell.est <- out.l$estF
+#saveRDS(cell.est, file="/dcl01/NDEpi/data/Projects/InProgress/jdou/Cell_Est/marb_placenta_epidish_planet.rds")
+identical(rownames(pd.cov), rownames(cell.est))
+cell.est <- cell.est[rownames(pd.cov),]
+pd.cov <- cbind(pd.cov,cell.est)
+
+#global DNAm
+pd.cov$meanDNAm <- pd.an$meanDNAm
+pd.cov$meanDNAm.sea <- pd.an$meanDNAm.sea
+pd.cov$meanDNAm.shore <- pd.an$meanDNAm.shore
+pd.cov$meanDNAm.shelf <- pd.an$meanDNAm.shelf
+pd.cov$meanDNAm.island <- pd.an$meanDNAm.island
+
+
+saveRDS(pd.cov, file.path(res.path,'QC/pd.rds'))
+saveRDS(beta, file.path(res.path,'QC/beta.rds'))
+
+pdf('planet_epidish_marbles_cell_est.pdf')
+  hist(pd.cov$Trophoblasts)
+  hist(pd.cov$Stromal)
+  hist(pd.cov$Hofbauer)
+  hist(pd.cov$Endothelial)
+  hist(pd.cov$nRBC)
+  hist(pd.cov$Syncytiotrophoblast)
+dev.off()
+```
