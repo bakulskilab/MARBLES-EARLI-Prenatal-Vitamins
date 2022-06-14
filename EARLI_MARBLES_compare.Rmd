@@ -56,6 +56,66 @@ paths <- list(marb.cord=path.marb.cord,
 saveRDS(paths, file=file.path(res.path,'pathway_list_pv2_withX.rds'))
 ```
 
+# compile PV monthly tables
+```{r}
+EARLI_cord_PVm <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/EARLI_cord/PV/PV_months.csv")
+EARLI_plac_PVm <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/EARLI_placenta/PV/PV_months.csv")
+MARBLES_cord_PVm <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_cord/PV/PV_months.csv")
+MARBLES_plac_PVm <- read.csv("/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_placenta/PV/PV_months.csv")
+
+EARLI_cord_PVm$cohort <- "EARLI cord"
+EARLI_plac_PVm$cohort <- "EARLI placenta"
+MARBLES_cord_PVm$cohort <- "MARBLES cord"
+MARBLES_plac_PVm$cohort <- "MARBLES placenta"
+
+EARLI_cord_PVm <- EARLI_cord_PVm[,c(14,1:13)]
+EARLI_plac_PVm <- EARLI_plac_PVm[,c(14,1:13)]
+MARBLES_cord_PVm <- MARBLES_cord_PVm[,c(14,1:13)]
+MARBLES_plac_PVm <- MARBLES_plac_PVm[,c(14,1:13)]
+
+PVm <- rbind(MARBLES_cord_PVm, MARBLES_plac_PVm, EARLI_cord_PVm, EARLI_plac_PVm)
+
+write.csv(PVm, file="/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/PV_months.csv", na="")
+```
+
+# cell type difference between cohorts
+```{r}
+pd.mp <- readRDS('/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_placenta/QC/pd.rds')
+pd.mc <- readRDS('/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/MARBLES_cord/QC/pd.rds') 
+pd.ep <- readRDS('/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/EARLI_placenta/QC/pd.rds') 
+pd.ec <- readRDS('/dcl01/NDEpi/data/Projects/InProgress/jdou/DNAm_EARLI_MARBLES/EARLI_cord/QC/pd.rds') 
+
+pd.mc$cohort <- "MARBLES"
+pd.ec$cohort <- "EARLI"
+cord <- rbind(pd.mc[,c("COI_ID", "cohort", "Bcell", "CD4T", "CD8T", "Gran", "Mono", "NK", "nRBC")], 
+              pd.ec[,c("COI_ID", "cohort", "Bcell", "CD4T", "CD8T", "Gran", "Mono", "NK", "nRBC")])
+
+pd.mp$cohort <- "MARBLES"
+pd.ep$cohort <- "EARLI"
+plac <- rbind(pd.mp[,c("COI_ID", "cohort", "Trophoblasts", "Stromal", "Hofbauer", "Endothelial", "nRBC", "Syncytiotrophoblast")],
+              pd.ep[,c("COI_ID", "cohort", "Trophoblasts", "Stromal", "Hofbauer", "Endothelial", "nRBC", "Syncytiotrophoblast")])
+
+
+cell_diffs_c <- sapply(c("Bcell", "CD4T", "CD8T", "Gran", "Mono", "NK", "nRBC"),
+                     FUN=function(x){
+                       t.test(cord[,x] ~ cord$cohort)$p.value
+                     })
+cell_diffs_c <- round(cell_diffs_c, 3)
+
+
+cell_diffs_p <- sapply(c("Trophoblasts", "Stromal", "Hofbauer", "Endothelial", "nRBC", "Syncytiotrophoblast"),
+                     FUN=function(x){
+                       t.test(plac[,x] ~ plac$cohort)$p.value
+                     })
+cell_diffs_p <- round(cell_diffs_p, 3)
+```
+Trophoblasts             Stromal            Hofbauer         Endothelial
+              0.323               0.530               0.000               0.342
+               nRBC Syncytiotrophoblast
+              0.003               0.188
+
+Bcell  CD4T  CD8T  Gran  Mono    NK  nRBC
+0.906 0.099 0.774 0.054 0.000 0.388 0.000
 
 # read locally
 ```{r}
@@ -424,12 +484,15 @@ p
 dev.off()
 ```
 
-Pathway
+# Pathway rank sum table
 ```{r}
 top.path <- lapply(path, FUN=function(x){
   x = x[x$P.DE<0.01,]
   x$TERM
 })
+
+sapply(top.path, length)
+names(top.path) <- c('MARBLES Cord', 'MARBLES Placenta', 'EARLI Cord', 'EARLI Placenta')
 
 upset(fromList(top.path), 
       nsets=7, 
@@ -438,8 +501,8 @@ upset(fromList(top.path),
       keep.order=T,
       text.scale=c(2.3, 1.8, 1.8, 1.3, 1.6, 1.6))
 
-common.paths <- Reduce(intersect, lapply(path, FUN=function(pathway){pathway$TERM}))
-
+#all but marb cord
+Reduce(intersect, top.path[-1])
 
 ordered <- lapply(path, FUN=function(x){
   x[match(common.paths, x$TERM), ]
@@ -465,6 +528,30 @@ path.rank.sum <- path.rank.sum[order(path.rank.sum$placenta_rank),]
 write.csv(path.rank.sum, file=file.path(local.path,'pathways_rank_sum_PV_plac_withX.csv'), row.names=F)
 
 ```
+
+
+# Write supplementary tables for pathway results
+```{r}
+library(openxlsx)
+
+format_pathway_table <- function(ptab){
+  colnames(ptab)[1] <- "GO_ID"
+  ptab[,-2]
+}
+
+write.csv(format_pathway_table(path$marb.cord), row.names = F,
+          file.path(local.path,'Tables/Supplementary Table 6 - MARBLES Cord Blood Pathway Results.csv'))
+
+write.csv(format_pathway_table(path$marb.plac), row.names = F,
+          file.path(local.path,'Tables/Supplementary Table 7 - MARBLES Placenta Pathway Results.csv'))
+
+write.csv(format_pathway_table(path$earl.cord), row.names = F,
+          file.path(local.path,'Tables/Supplementary Table 8 - EARLI Cord Blood Pathway Results.csv'))
+
+write.csv(format_pathway_table(path$earl.plac), row.names = F,
+          file.path(local.path,'Tables/Supplementary Table 9 - EARLI Placenta Pathway Results.csv'))
+```
+
 
 
 MARBLES DMR Placenta

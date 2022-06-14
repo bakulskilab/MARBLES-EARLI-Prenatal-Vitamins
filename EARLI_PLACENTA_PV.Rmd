@@ -189,6 +189,10 @@ pd.cov <- readRDS(file.path(res.path,'QC/pd.rds'))
 beta <- readRDS(file.path(res.path,'QC/beta.rds'))
 
 supp <- read.sas7bdat('/dcl01/NDEpi/data/Projects/InProgress/jdou/MARBLES/Placenta_Supp/e_m_vit_supp_20190411.sas7bdat')
+cov <- read.sas7bdat("/dcl01/NDEpi/data/Projects/InProgress/jdou/e_m_covars_v8_05may21.sas7bdat")
+
+load("/dcl01/NDEpi/data/MasterCohortData/EARLI/EARLIBiologicalSamples/450k/earli.450k.pd.N=1225.20161117.rda")
+pd.cov$Round <- pd[match(pd.cov$COI_ID, pd$Subject.ID), 'Round']
 ```
 
 ## Get supplement
@@ -200,19 +204,19 @@ pd.cov$PVmo1 <- supp$PV_YN_MO1
 table(pd.cov$PVmo1,exclude = NULL)
 ```
 
-# model fitting
+# model fitting prep
 ```{r models}
 library(qqman)
 library(limma)
 
 ### no missing, no smokers
 
-#get rid of smoking
+#get rid of smoking (n=6)
 pd.mod <- pd.cov[pd.cov$smk_preg!=1,]
 
 #get rid missing
 pd.mod <- pd.mod[,c('COI_ID', 'PVmo1', 'mom_edu_bn', 'PC1', 'PC2', 'PC3', 'PC4', 'PC5',
-                    'sex', 'mom_age', 'gest_age', 'Hofbauer', 'Syncytiotrophoblast')]
+                    'sex', 'mom_age', 'gest_age', 'Hofbauer', 'Syncytiotrophoblast', 'Round')]
 pd.mod <- na.omit(pd.mod)
 
 nrow(pd.cov) #127
@@ -236,21 +240,112 @@ pd.mod$Syncytiotrophoblast <- pd.cov[match(pd.mod$COI_ID, pd.cov$COI_ID),'Syncyt
 pd.mod$ancest_cat <- ifelse(pd.mod$ancest_cat=='EARLI Eur', 'European',
                      ifelse(pd.mod$ancest_cat=='EARLI Latin', 'Hispanic', 'Other/Mix'))
 
+#check out BMI
+cov.mod <- cov[match(pd.mod$COI_ID, cov$COI_ID),]
+pd.mod$bmi <- cov.mod$Mat_BMI_PrePreg
+
+### supplement by month table
+supp <- supp[match(pd.mod$COI_ID, supp$coi_id),]
+
+PV_months <- matrix(NA, nrow=3, ncol=12)
+colnames(PV_months) <- colnames(supp)[22:33]
+rownames(PV_months) <- c("Yes","No","Missing")
+
+for(month in colnames(supp)[22:33]){
+  tab <- table(supp[,month],exclude=NULL)
+  PV_months["Yes", month] <- tab['1']
+  PV_months["No", month] <- tab['0']
+  PV_months["Missing", month] <- tab['NaN']
+}
+
+write.csv(PV_months, file=file.path(res.path,"PV/PV_months.csv"))
+
+
+
 ### table 1
 library(compareGroups)
 
 restab <- compareGroups(PVmo1 ~ mom_edu_bn + ancest_cat + mom_age +
                            sex + gest_age + Trophoblasts + Stromal + Hofbauer + Endothelial + nRBC + Syncytiotrophoblast +
-                          meanDNAm + meanDNAm.sea + meanDNAm.shelf + meanDNAm.shore + meanDNAm.island,
-                        data=pd.mod, method=c(ancest_cat=3))
+                          meanDNAm + meanDNAm.sea + meanDNAm.shelf + meanDNAm.shore + meanDNAm.island + bmi + Round,
+                        data=pd.mod, method=c(ancest_cat=3, Round=3))
 
 
 tab1 <- createTable(restab)
 export2word(tab1, file=file.path(res.path,'PV/table1.docx'))
+```
+
+# PC plot 
+```{r}
+library(ggplot2)
+library(reshape2)
+
+pc <- prcomp(t(beta), center=T)
+head(pc$x)
+identical(colnames(pc$x), colnames(pd.cov))
+
+for.plot <- data.frame(pc$x[,1:6])
+table(rownames(pd.mod) %in% rownames(for.plot))
+for.plot <- for.plot[rownames(pd.mod),]
+for.plot$PVmo1 <- pd.mod$PVmo1
+for.plot$batch <- as.factor(pd.mod$Round)
+for.plot$sex <- pd.mod$sex
+for.plot$mom_edu_bn <- pd.mod$mom_edu_bn
+for.plot$mom_age <- pd.mod$mom_age
+for.plot$gest_age <- pd.mod$gest_age
+for.plot$Syncytiotrophoblast <- pd.mod$Syncytiotrophoblast
+for.plot$Hofbauer <- pd.mod$Hofbauer
+
+# pdf(file.path(res.path,"PC_plot.pdf"))
+#   pairs(for.plot[,1:4], col=as.factor(for.plot$sex), labels=c("PC1", "PC2", "PC3", "PC4"), pch=1, cex=0.5)
+#   pairs(for.plot[,1:4], col=for.plot$batch, labels=c("PC1", "PC2", "PC3", "PC4"), pch=1, cex=0.5)
+# dev.off()
+
+sex.plot <- ggplot(for.plot, aes(x=PC1, y=PC2, col=sex))+
+  geom_point() + theme_classic()
+
+batch.plot <- ggplot(for.plot, aes(x=PC2, y=PC3, col=batch))+
+  geom_point() + theme_classic()
+
+ggsave(batch.plot, file=file.path(res.path,"PC_batch.svg"))
+ggsave(sex.plot, file=file.path(res.path,"PC_sex.svg"))
+
+#heatmap PC vs covars
+heatmap.pc <- matrix(NA, nrow=8, ncol=6)
+colnames(heatmap.pc) <- paste0("PC",1:6)
+rownames(heatmap.pc) <- c("PVmo1","mom_edu_bn","mom_age","gest_age","sex","Syncytiotrophoblast","Hofbauer","batch")
+
+for(PC in colnames(heatmap.pc)){
+  heatmap.pc["PVmo1",PC] <- t.test(for.plot[,PC] ~ for.plot$PVmo1)$p.value
+  heatmap.pc["mom_edu_bn",PC] <- t.test(for.plot[,PC] ~ for.plot$mom_edu_bn)$p.value
+  heatmap.pc["mom_age",PC] <- cor.test(for.plot[,PC],for.plot$mom_age)$p.value
+  heatmap.pc["gest_age",PC] <- cor.test(for.plot[,PC],for.plot$gest_age)$p.value
+  heatmap.pc["sex",PC] <- t.test(for.plot[,PC] ~ for.plot$sex)$p.value
+  heatmap.pc["Syncytiotrophoblast",PC] <- cor.test(for.plot[,PC],for.plot$Syncytiotrophoblast)$p.value
+  heatmap.pc["Hofbauer",PC] <- cor.test(for.plot[,PC],for.plot$Hofbauer)$p.value
+  heatmap.pc["batch",PC] <- t.test(for.plot[,PC] ~ for.plot$batch)$p.value
+}
+
+heatmap.pc.wide <- melt(heatmap.pc)
+heatmap.pc.wide$text <- round(heatmap.pc.wide$value, 3)
+heatmap.pc.wide$text <- ifelse(heatmap.pc.wide$text < 0.001, "< 0.001", heatmap.pc.wide$text)
+heatmap.pc.wide$groups <- cut(heatmap.pc.wide$value, breaks=c(0,0.001,0.05,0.1,0.5,1.0))
+
+heatmap.plot <- ggplot(heatmap.pc.wide, aes(x=Var2, y=Var1, fill=groups)) +
+  geom_tile() +
+  scale_fill_manual(values=c("firebrick","tomato1","goldenrod1","khaki","white")) +
+  geom_text(aes(label=text), color="black") + xlab("") + ylab("") +
+  theme_bw() + theme(legend.position="none") +
+  scale_y_discrete(labels=c("Prenatal Vitamins\nMonth 1", "Maternal\nEducation", "Maternal\nAge","Gestational\nAge","Sex",
+                   "Syncytiotrophoblast\nProportion","Hofbauer\nProportion","Batch"))
+
+ggsave(heatmap.plot, file=file.path(res.path,"PC_heatmap.svg"), width=8, height=7)
+```
 
 
-#### model
-mod <- model.matrix(~factor(pd.mod$PVmo1) + pd.mod$sex + pd.mod$mom_age + pd.mod$gest_age + pd.mod$mom_edu_bn + pd.mod$PC1 + pd.mod$PC2 + pd.mod$PC3 + pd.mod$PC4 + pd.mod$PC5 + pd.mod$Syncytiotrophoblast + pd.mod$Hofbauer)
+### model
+```{r}
+mod <- model.matrix(~factor(pd.mod$PVmo1) + pd.mod$sex + pd.mod$mom_age + pd.mod$gest_age + pd.mod$mom_edu_bn + pd.mod$PC1 + pd.mod$PC2 + pd.mod$PC3 + pd.mod$PC4 + pd.mod$PC5 + pd.mod$Syncytiotrophoblast + pd.mod$Hofbauer + pd.mod$Round)
 out <- lmFit(beta[,rownames(pd.mod)],mod)
 out <- eBayes(out)
 ss.hits.pv <- topTable(out, coef=2, number=nrow(beta))
