@@ -3,7 +3,7 @@
 John F. Dou, Lauren Y.M. Middleton, Yihui Zhu, Kelly S. Benke, Jason I. Feinberg, Lisa A. Croen, Irva Hertz-Picciotto, Craig J. Newschaffer, Janine M. LaSalle, Daniele Fallin, Rebecca J. Schmidt, Kelly M. Bakulski
 
 ## Citation Information
-15.	Dou JF, Middleton LYM, Zhu Y, Benke KS, Feinberg JI, Croen LA, Hertz-Picciotto I, Newschaffer CJ, LaSalle JM, Fallin MD*, Schmidt RJ*, Bakulski KM*. 2022. Prenatal vitamin intake in first month of pregnancy and DNA methylation in cord blood and placenta in two prospective cohorts. Epigenetics & Chromatin. PMID: 35918756, PMCID: PMC9344645
+Dou JF, Middleton LYM, Zhu Y, Benke KS, Feinberg JI, Croen LA, Hertz-Picciotto I, Newschaffer CJ, LaSalle JM, Fallin MD*, Schmidt RJ*, Bakulski KM*. 2022. Prenatal vitamin intake in first month of pregnancy and DNA methylation in cord blood and placenta in two prospective cohorts. Epigenetics & Chromatin. PMID: 35918756, PMCID: PMC9344645
 
 This Github repository contains the data management and analytic scripts to produce the following manuscript: [Prenatal vitamin intake in first month of pregnancy and DNA methylation in cord blood and placenta in two prospective cohorts](https://epigeneticsandchromatin.biomedcentral.com/articles/10.1186/s13072-022-00460-9)
 
